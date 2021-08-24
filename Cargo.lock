@@ -693,6 +693,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "murmur3"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ead5388e485d38e622630c6b05afd3761a6701ff15c55b279ea5b31dcb62cff"
+
+[[package]]
 name = "num-derive"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1022,6 +1028,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab_alloc"
+version = "1.0.0"
+dependencies = [
+ "arrayref",
+ "bytemuck",
+ "murmur3",
+ "num_enum",
+ "solana-program",
+ "static_assertions",
+ "thiserror",
+]
+
+[[package]]
 name = "solana-frozen-abi"
 version = "1.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1184,7 +1203,9 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "bytemuck",
  "num_enum",
+ "slab_alloc",
  "solana-program",
 ]
 

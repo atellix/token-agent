@@ -1,7 +1,7 @@
 //use uuid::Uuid;
-//use std::{ mem::size_of, io::Cursor };
-//use bytemuck::{ Pod, Zeroable };
+use std::{ string::String, mem::size_of, io::Cursor };
 //use byte_slice_cast::*;
+use bytemuck::{ Pod, Zeroable };
 use num_enum::TryFromPrimitive;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{ self, Transfer, TokenAccount, Approve };
@@ -11,15 +11,18 @@ use solana_program::{
     system_instruction,
 };
 
-//extern crate slab_alloc;
-//use slab_alloc::{ SlabPageAlloc, CritMapHeader, LeafNode, AnyNode, CritMap, SlabVec };
+extern crate slab_alloc;
+use slab_alloc::{ SlabPageAlloc, CritMapHeader, LeafNode, AnyNode, CritMap, SlabVec };
+
+const MAX_REBILL_ENTRIES: u32 = 256;
 
 #[repr(u8)]
-#[derive(PartialEq, Debug, Eq, Copy, Clone)]
+#[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
 pub enum AccountDataType { // Specific account data type check to prevent mixing and matching of account parameters
     Undefined,
     Subscription,
     Rebill,
+    RebillData, // Specified in RebillDataHeader
     RebillManager,
     TokenAllowance,
 }
@@ -32,13 +35,140 @@ pub enum Status { // Status types
     Deleted,
 }
 
+#[repr(u8)]
+#[derive(PartialEq, Debug, Eq, Copy, Clone)]
+pub enum SubscriptionPeriod {
+    Daily,
+    Weekly,
+    Monthly,
+    Quarterly,
+    Yearly,
+}
+
+#[repr(u16)]
+#[derive(PartialEq, Debug, Eq, Copy, Clone)]
+pub enum DT { // Data types
+    RebillDataHeader,
+    RebillData,
+}
+
+#[derive(Copy, Clone)]
+#[repr(packed)]
+pub struct RebillDataHeader {
+    pub data_type: AccountDataType,
+    pub subscr_data: Pubkey, // The subscription data account this rebill data is associated with
+}
+unsafe impl Zeroable for RebillDataHeader {}
+unsafe impl Pod for RebillDataHeader {}
+
+impl RebillDataHeader {
+    pub fn check_data_type(&self, check: AccountDataType) -> ProgramResult {
+        if self.data_type != check {
+            msg!("Error: Invalid data type for RebillData");
+            return Err(ErrorCode::InvalidDataType.into());
+        }
+        Ok(())
+    }
+
+    pub fn subscr_data(&self) -> Pubkey {
+        self.subscr_data
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(packed)]
+pub struct RebillData {
+    pub event_uuid: u128,
+    pub event_ts: u64,          // The UTC timestamp when the event is being processed
+    pub rebill_ts: u64,         // The UTC timestamp that corresponds to the first second of the rebill period
+    pub rebill_str: [u8; 32],   // The rebill datestamp string
+    pub rebill_strlen: u8,      // The length of the rebill datestamp string
+    pub manager_key: Pubkey,    // The public key of the manager doing the rebill
+    pub amount: u64,            // The rebill amount in raw tokens (same decimals as the token mint)
+}
+unsafe impl Zeroable for RebillData {}
+unsafe impl Pod for RebillData {}
+
+impl RebillData {
+    pub fn event_uuid(&self) -> u128 {
+        self.event_uuid
+    }
+
+    pub fn event_ts(&self) -> u64 {
+        self.event_ts
+    }
+
+    pub fn rebill_ts(&self) -> u64 {
+        self.rebill_ts
+    }
+
+    pub fn rebill_str(&self) -> String {
+        let rbslc = &self.rebill_str[0..self.rebill_strlen as usize];
+        String::from_utf8(rbslc.to_vec()).expect("Invalid utf8 string")
+    }
+
+    pub fn manager_key(&self) -> Pubkey {
+        self.manager_key
+    }
+
+    pub fn amount(&self) -> u64 {
+        self.amount
+    }
+}
+
 #[program]
 mod token_agent {
     use super::*;
 
     pub fn create_subscription(ctx: Context<CreateSubscr>,
-//        bool link_token
+//      link_token: bool,
+//      initial_payment: bool,
+//      initial_amount: u64,
+//      initial_uuid: u64,
+        inp_subscr_uuid: u128,
+        inp_period: u8,
+        inp_budget: u64,
+        inp_pause_enabled: bool,
+        inp_rebill_max: u32,
+        inp_max_delay: u64,
+        inp_not_valid_before: u64,
+        inp_not_valid_after: u64,
     ) -> ProgramResult {
+        // Setup up token delegate if needed
+
+        // Create subscription data
+        let subscr = &mut ctx.accounts.subscr_data;
+        // TODO: network authority approvals
+        subscr.user_key = *ctx.accounts.user_key.to_account_info().key;
+        subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
+        subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
+        subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
+        subscr.rebill_data = *ctx.accounts.rebill_data.to_account_info().key;
+        subscr.rebill_max = inp_rebill_max;
+        subscr.max_delay = inp_max_delay;
+        subscr.not_valid_before = inp_not_valid_before;
+        subscr.not_valid_after = inp_not_valid_after;
+        subscr.subscr_uuid = inp_subscr_uuid;
+        subscr.period = inp_period;
+        subscr.budget = inp_budget;
+        subscr.pause_enabled = inp_pause_enabled;
+
+        // Create rebill data
+        let rbdata: &mut[u8] = &mut ctx.accounts.rebill_data.try_borrow_mut_data()?;
+        let pt = SlabPageAlloc::new(rbdata);
+        pt.setup_page_table();
+        pt.allocate::<SlabVec, RebillDataHeader>(DT::RebillDataHeader as u16, 1).expect("Failed to allocate");
+        pt.allocate::<CritMap, RebillData>(DT::RebillData as u16, MAX_REBILL_ENTRIES as usize).expect("Failed to allocate");
+        let mut rebill_header_vec = SlabVec::new();
+        let rebill_header = RebillDataHeader {
+            data_type: AccountDataType::RebillData,
+            subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
+        };
+        *pt.index_mut::<RebillDataHeader>(DT::RebillDataHeader as u16, rebill_header_vec.next_index() as usize) = rebill_header;
+        *pt.header_mut::<SlabVec>(DT::RebillDataHeader as u16) = rebill_header_vec;
+
+        // TODO: Log event
+
         Ok(())
     }
 
@@ -83,16 +213,6 @@ pub struct CreateSubscr<'info> {
     pub rebill_data: AccountInfo<'info>,
 }
 
-#[repr(u8)]
-#[derive(PartialEq, Debug, Eq, Copy, Clone)]
-pub enum SubscriptionPeriod {
-    Daily,
-    Weekly,
-    Monthly,
-    Quarterly,
-    Yearly,
-}
-
 #[account]
 pub struct SubscrData {
     pub data_type: u8,                  // AccountDataType to prevent mixing and matching of data
@@ -109,6 +229,7 @@ pub struct SubscrData {
     pub rebill_max: u32,                // Maximum number of times to rebill (0 = unlimited)
     pub not_valid_before: u64,          // UTC timestamp before which no subscription processing can occur
     pub not_valid_after: u64,           // UTC timestamp after which no subscription processing can occur
+    pub max_delay: u64,                 // The number of seconds after the start of the rebill period the manager can be delayed in attempting to rebill
     pub subscr_uuid: u128,              // Subscription UUID
     pub period: u8,                     // Subscription rebill period
     pub budget: u64,                    // Subscription budget (maximum amount, not necessarily the amount that will be billed which could be less)
@@ -146,4 +267,6 @@ pub struct TokenAllowance {
 pub enum ErrorCode {
     #[msg("Access denied")]
     AccessDenied,
+    #[msg("Invalid data type")]
+    InvalidDataType,
 }
