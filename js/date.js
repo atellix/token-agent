@@ -1,26 +1,23 @@
 const { DateTime } = require("luxon")
 var dt0 = DateTime.now().setZone('utc')
 
-var dt1 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
-var dt2 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
-var dt3 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
-//var dt4 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
-var dt5 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
-
 console.log('ISO')
 console.log(dt0.toISO())
 
 console.log('Day')
 console.log(dt0.toFormat('yyyyLLdd'))
+var dt1 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
 console.log(dt1.minus({ hours: dt1.hour, minutes: dt1.minute, seconds: dt1.second }).toISO())
 
 console.log('Week')
 console.log(dt0.toFormat("yyyy'w'WW"))
+var dt2 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
 dt2 = dt2.minus({ days: dt2.weekday - 1, hours: dt2.hour, minutes: dt2.minute, seconds: dt2.second })
 console.log(dt2.toISO() + ' w' + dt2.toFormat('WW'))
 
 console.log('Month')
 console.log(dt0.toFormat('yyyyLL'))
+var dt3 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
 console.log(dt3.minus({ days: dt3.day - 1, hours: dt3.hour, minutes: dt3.minute, seconds: dt3.second }).toISO())
 
 console.log('Quarter')
@@ -30,5 +27,6 @@ console.log(dt4.toISO() + ' q' + dt4.quarter)
 
 console.log('Year')
 console.log(dt0.toFormat('yyyy'))
+var dt5 = DateTime.fromSeconds(Math.floor(dt0.toSeconds())).setZone('utc')
 console.log(dt5.minus({ months: dt5.month - 1, days: dt5.day - 1, hours: dt5.hour, minutes: dt5.minute, seconds: dt5.second }).toISO())
 

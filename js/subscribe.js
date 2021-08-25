@@ -1,4 +1,5 @@
 const { Buffer } = require('buffer')
+const { DateTime } = require("luxon")
 const { v4: uuidv4, parse: uuidparse } = require('uuid')
 const { PublicKey } = require('@solana/web3.js')
 const { TOKEN_PROGRAM_ID } = require('@solana/spl-token')
@@ -76,8 +77,13 @@ async function main() {
     )
 
     console.log('Process')
+    const eventId = uuidv4()
+    const unixTs = Math.floor(DateTime.now().toSeconds())
     const tx3 = await tokenAgent.transaction.processSubscription(
-        //new anchor.BN(uuidparse(subscrId)), // inp_subscr_uuid
+        new anchor.BN(uuidparse(eventId)),  // inp_event_uuid
+        new anchor.BN(unixTs),              // inp_rebill_ts
+        "Hello",                            // inp_rebill_str
+        new anchor.BN(5000),                // inp_amount
         {
             accounts: {
                 subscrData: subscrData.publicKey,

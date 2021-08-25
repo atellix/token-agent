@@ -1,5 +1,5 @@
 //use uuid::Uuid;
-use std::{ string::String, mem::size_of, io::Cursor };
+use std::{ string::String, mem::size_of, io::Cursor, result::Result as FnResult };
 //use byte_slice_cast::*;
 use bytemuck::{ Pod, Zeroable };
 use num_enum::TryFromPrimitive;
@@ -93,8 +93,8 @@ impl RebillDataHeader {
 #[repr(packed)]
 pub struct RebillData {
     pub event_uuid: u128,
-    pub event_ts: u64,          // The UTC timestamp when the event is being processed
-    pub rebill_ts: u64,         // The UTC timestamp that corresponds to the first second of the rebill period
+    pub event_ts: i64,          // The UTC timestamp when the event is being processed
+    pub rebill_ts: i64,         // The UTC timestamp that corresponds to the first second of the rebill period
     pub rebill_str: [u8; 32],   // The rebill datestamp string
     pub rebill_strlen: u8,      // The length of the rebill datestamp string
     pub manager_key: Pubkey,    // The public key of the manager doing the rebill
@@ -108,11 +108,11 @@ impl RebillData {
         self.event_uuid
     }
 
-    pub fn event_ts(&self) -> u64 {
+    pub fn event_ts(&self) -> i64 {
         self.event_ts
     }
 
-    pub fn rebill_ts(&self) -> u64 {
+    pub fn rebill_ts(&self) -> i64 {
         self.rebill_ts
     }
 
@@ -127,6 +127,21 @@ impl RebillData {
 
     pub fn amount(&self) -> u64 {
         self.amount
+    }
+}
+
+pub fn get_period_string(ts: i64, period: SubscriptionPeriod) -> FnResult<String, ProgramError> {
+    let dt = NaiveDateTime::from_timestamp(ts, 0);
+    match period {
+        SubscriptionPeriod::Daily => Ok(dt.format("%Y%m%d").to_string()),
+        SubscriptionPeriod::Weekly => Ok(dt.format("%Yw%U").to_string()),
+        SubscriptionPeriod::Monthly => Ok(dt.format("%Y%m").to_string()),
+        SubscriptionPeriod::Quarterly => {
+            let mut q = dt.date().month().checked_div(3).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+            q = q.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+            Ok(format!("{}q{}", dt.format("%Y").to_string(), q.to_string()))
+        },
+        SubscriptionPeriod::Yearly => Ok(dt.format("%Y").to_string()),
     }
 }
 
@@ -198,12 +213,28 @@ mod token_agent {
         Ok(())
     } */
 
-    pub fn process_subscription(ctx: Context<ProcessSubscr>
+    pub fn process_subscription(ctx: Context<ProcessSubscr>,
+        inp_event_uuid: u128,
+        inp_rebill_ts: i64,
+        inp_rebill_str: String,
+        inp_amount: u64,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
         msg!("Clock Timestamp: {}", ts.to_string());
-        let dt = NaiveDateTime::from_timestamp(ts, 0);
+
+        let d1 = get_period_string(ts, SubscriptionPeriod::Daily)?;
+        msg!("Daily: {}", d1.to_string());
+        let d2 = get_period_string(ts, SubscriptionPeriod::Weekly)?;
+        msg!("Weekly: {}", d2.to_string());
+        let d3 = get_period_string(ts, SubscriptionPeriod::Monthly)?;
+        msg!("Monthly: {}", d3.to_string());
+        let d4 = get_period_string(ts, SubscriptionPeriod::Quarterly)?;
+        msg!("Quarterly: {}", d4.to_string());
+        let d5 = get_period_string(ts, SubscriptionPeriod::Yearly)?;
+        msg!("Yearly: {}", d5.to_string());
+
+        /* let dt = NaiveDateTime::from_timestamp(ts, 0);
         let q = (dt.date().month() / 3).checked_add(1);
         if q == None {
             msg!("Overflow");
@@ -213,7 +244,7 @@ mod token_agent {
         msg!("Week: {}", dt.format("%Yw%U").to_string());
         msg!("Month: {}", dt.format("%Y%m").to_string());
         msg!("Quarter: {}q{}", dt.format("%Y").to_string(), q.unwrap().to_string());
-        msg!("Year: {}", dt.format("%Y").to_string());
+        msg!("Year: {}", dt.format("%Y").to_string()); */
         Ok(())
     }
 
