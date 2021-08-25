@@ -74,6 +74,20 @@ async function main() {
             }
         }
     )
+
+    console.log('Process')
+    const tx3 = await tokenAgent.transaction.processSubscription(
+        //new anchor.BN(uuidparse(subscrId)), // inp_subscr_uuid
+        {
+            accounts: {
+                subscrData: subscrData.publicKey,
+                rebillData: rebillData.publicKey,
+                managerKey: managerPK.publicKey,
+                managerApproval: managerAP.publicKey
+            }
+        }
+    )
+    await provider.send(tx3, [managerPK])
 }
 
 console.log('Begin')

@@ -3,12 +3,14 @@ use std::{ string::String, mem::size_of, io::Cursor };
 //use byte_slice_cast::*;
 use bytemuck::{ Pod, Zeroable };
 use num_enum::TryFromPrimitive;
+use chrono::{ NaiveDateTime, Datelike };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{ self, Transfer, TokenAccount, Approve };
 use solana_program::{
     program::{ invoke_signed },
     account_info::AccountInfo,
     system_instruction,
+    clock::Clock,
 };
 
 extern crate slab_alloc;
@@ -59,6 +61,8 @@ pub struct RebillDataHeader {
     pub subscr_data: Pubkey,            // The subscription data account this rebill data is associated with
     pub manager_key: Pubkey,            // The rebill manager account being assigned
     pub manager_approval: Pubkey,       // The rebill manager approval from the network authority
+    pub prev_data: Option<Pubkey>,      // The previous subscription data
+    pub next_data: Option<Pubkey>,      // The next subscription data
 }
 unsafe impl Zeroable for RebillDataHeader {}
 unsafe impl Pod for RebillDataHeader {}
@@ -175,6 +179,8 @@ mod token_agent {
             subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
             manager_key: *ctx.accounts.manager_key.to_account_info().key,
             manager_approval: *ctx.accounts.manager_approval.to_account_info().key,
+            next_data: None,
+            prev_data: None,
         };
         *pt.index_mut::<RebillDataHeader>(DT::RebillDataHeader as u16, rebill_header_vec.next_index() as usize) = rebill_header;
         *pt.header_mut::<SlabVec>(DT::RebillDataHeader as u16) = rebill_header_vec;
@@ -192,9 +198,24 @@ mod token_agent {
         Ok(())
     } */
 
-//    pub fn process_subscription() -> ProgramResult {
-//        Ok(())
-//    }
+    pub fn process_subscription(ctx: Context<ProcessSubscr>
+    ) -> ProgramResult {
+        let clock = Clock::get()?;
+        let ts = clock.unix_timestamp;
+        msg!("Clock Timestamp: {}", ts.to_string());
+        let dt = NaiveDateTime::from_timestamp(ts, 0);
+        let q = (dt.date().month() / 3).checked_add(1);
+        if q == None {
+            msg!("Overflow");
+            return Err(ErrorCode::Overflow.into());
+        }
+        msg!("Day: {}", dt.format("%Y%m%d").to_string());
+        msg!("Week: {}", dt.format("%Yw%U").to_string());
+        msg!("Month: {}", dt.format("%Y%m").to_string());
+        msg!("Quarter: {}q{}", dt.format("%Y").to_string(), q.unwrap().to_string());
+        msg!("Year: {}", dt.format("%Y").to_string());
+        Ok(())
+    }
 
 /*    pub fn approve_allowance() -> ProgramResult {
         Ok(())
@@ -288,4 +309,6 @@ pub enum ErrorCode {
     AccessDenied,
     #[msg("Invalid data type")]
     InvalidDataType,
+    #[msg("Overflow")]
+    Overflow,
 }
