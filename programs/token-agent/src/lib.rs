@@ -14,7 +14,7 @@ use solana_program::{
 extern crate slab_alloc;
 use slab_alloc::{ SlabPageAlloc, CritMapHeader, LeafNode, AnyNode, CritMap, SlabVec };
 
-const MAX_REBILL_ENTRIES: u32 = 256;
+const MAX_REBILL_ENTRIES: u32 = 4;
 
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
