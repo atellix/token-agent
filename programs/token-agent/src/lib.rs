@@ -56,7 +56,9 @@ pub enum DT { // Data types
 #[repr(packed)]
 pub struct RebillDataHeader {
     pub data_type: AccountDataType,
-    pub subscr_data: Pubkey, // The subscription data account this rebill data is associated with
+    pub subscr_data: Pubkey,            // The subscription data account this rebill data is associated with
+    pub manager_key: Pubkey,            // The rebill manager account being assigned
+    pub manager_approval: Pubkey,       // The rebill manager approval from the network authority
 }
 unsafe impl Zeroable for RebillDataHeader {}
 unsafe impl Pod for RebillDataHeader {}
@@ -72,6 +74,14 @@ impl RebillDataHeader {
 
     pub fn subscr_data(&self) -> Pubkey {
         self.subscr_data
+    }
+
+    pub fn manager_key(&self) -> Pubkey {
+        self.manager_key
+    }
+
+    pub fn manager_approval(&self) -> Pubkey {
+        self.manager_approval
     }
 }
 
@@ -163,6 +173,8 @@ mod token_agent {
         let rebill_header = RebillDataHeader {
             data_type: AccountDataType::RebillData,
             subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
+            manager_key: *ctx.accounts.manager_key.to_account_info().key,
+            manager_approval: *ctx.accounts.manager_approval.to_account_info().key,
         };
         *pt.index_mut::<RebillDataHeader>(DT::RebillDataHeader as u16, rebill_header_vec.next_index() as usize) = rebill_header;
         *pt.header_mut::<SlabVec>(DT::RebillDataHeader as u16) = rebill_header_vec;
@@ -178,13 +190,13 @@ mod token_agent {
 
     pub fn update_subscription_manager() -> ProgramResult {
         Ok(())
-    }
+    } */
 
-    pub fn process_subscription() -> ProgramResult {
-        Ok(())
-    }
+//    pub fn process_subscription() -> ProgramResult {
+//        Ok(())
+//    }
 
-    pub fn approve_allowance() -> ProgramResult {
+/*    pub fn approve_allowance() -> ProgramResult {
         Ok(())
     }
 
@@ -203,7 +215,11 @@ pub struct CreateSubscr<'info> {
     #[account(init)]
     pub subscr_data: ProgramAccount<'info, SubscrData>,
     pub merchant_key: AccountInfo<'info>,
+    pub merchant_approval: AccountInfo<'info>,
+    pub manager_key: AccountInfo<'info>,
     //pub merchant_approval: ProgramAccount<'info, MerchantApproval>,
+    pub manager_approval: AccountInfo<'info>,
+    //pub manager_approval: ProgramAccount<'info, ManagerApproval>,
     //pub abort_authority: ProgramAccount<'info, MerchantApproval>,
     #[account(signer)]
     pub user_key: AccountInfo<'info>,
@@ -213,12 +229,23 @@ pub struct CreateSubscr<'info> {
     pub rebill_data: AccountInfo<'info>,
 }
 
+#[derive(Accounts)]
+pub struct ProcessSubscr<'info> {
+    #[account(mut)]
+    pub subscr_data: ProgramAccount<'info, SubscrData>,
+    #[account(mut)]
+    pub rebill_data: AccountInfo<'info>,
+    #[account(signer)]
+    pub manager_key: AccountInfo<'info>,
+    pub manager_approval: AccountInfo<'info>,
+}
+
 #[account]
 pub struct SubscrData {
     pub data_type: u8,                  // AccountDataType to prevent mixing and matching of data
     //pub approval_program: Pubkey,       // The address of the network authority program that signs approvals
     pub merchant_key: Pubkey,           // The merchant account that receives subscription payments
-    //pub merchant_approval: Pubkey,      // The merchant approval record from the network authority
+    pub merchant_approval: Pubkey,      // The merchant approval record from the network authority
     //pub abort_authority: Pubkey,        // The abort authority from the network authority to abort in case of hacks
     pub user_key: Pubkey,               // The user that owns this subscription
     pub token_mint: Pubkey,             // The token mint to pay for the subscription
@@ -240,14 +267,6 @@ pub struct SubscrData {
 // TODO: Merchant approval
 // TODO: Rebill approval
 // TODO: Abort authority
-
-#[account]
-pub struct AssignRebillManager {
-    pub data_type: u8,                  // AccountDataType to prevent mixing and matching of data
-    pub subscr_data: Pubkey,            // The subscription data for this assignment
-    pub rebill_approval: Pubkey,        // The rebill manager approval from the network authority
-    pub manager_key: Pubkey,            // The rebill manager account being assigned
-}
 
 #[account]
 pub struct TokenAllowance {

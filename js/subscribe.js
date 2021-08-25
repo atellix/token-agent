@@ -19,10 +19,13 @@ async function main() {
     const subscrDataRent = await provider.connection.getMinimumBalanceForRentExemption(subscrDataBytes)
     console.log('Subscr Data Rent: ' + subscrDataRent)
     const merchantPK = anchor.web3.Keypair.generate()
+    const merchantAP = anchor.web3.Keypair.generate()
+    const managerPK = anchor.web3.Keypair.generate()
+    const managerAP = anchor.web3.Keypair.generate()
     const tokenMint = new PublicKey('7KCJVP436UCWf4qT4Nc6ora62ZqsYtadyft47QLmFUHL')
     const tokenAccount = new PublicKey('44EkCqNcJJZA7h5aaPDTnmj1cuLgigdxUbXdhpBX58nk')
     const rebillData = anchor.web3.Keypair.generate()
-    const rebillDataBytes = 66 + (512 * 2)
+    const rebillDataBytes = 58 + (256 * 3)
     const rebillDataRent = await provider.connection.getMinimumBalanceForRentExemption(rebillDataBytes)
     console.log('Rebill Data Rent: ' + rebillDataRent)
     const tx = new anchor.web3.Transaction()
@@ -61,6 +64,9 @@ async function main() {
             accounts: {
                 subscrData: subscrData.publicKey,
                 merchantKey: merchantPK.publicKey,
+                merchantApproval: merchantAP.publicKey,
+                managerKey: managerPK.publicKey,
+                managerApproval: managerAP.publicKey,
                 userKey: provider.wallet.publicKey,
                 tokenMint: tokenMint,
                 tokenAccount: tokenAccount,
