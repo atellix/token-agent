@@ -13,30 +13,6 @@ use solana_program::{
     clock::Clock,
 };
 
-extern crate slab_alloc;
-use slab_alloc::{ SlabPageAlloc, CritMapHeader, LeafNode, AnyNode, CritMap, SlabVec };
-
-const MAX_REBILL_ENTRIES: u32 = 4;
-
-#[repr(u8)]
-#[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
-pub enum AccountDataType { // Specific account data type check to prevent mixing and matching of account parameters
-    Undefined,
-    Subscription,
-    Rebill,
-    RebillData, // Specified in RebillDataHeader
-    RebillManager,
-    TokenAllowance,
-}
-
-#[repr(u32)]
-#[derive(PartialEq, Debug, Eq, Copy, Clone)]
-pub enum Status { // Status types
-    Unallocated,
-    Active,
-    Deleted,
-}
-
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
 pub enum SubscriptionPeriod {
@@ -45,89 +21,6 @@ pub enum SubscriptionPeriod {
     Monthly,
     Quarterly,
     Yearly,
-}
-
-#[repr(u16)]
-#[derive(PartialEq, Debug, Eq, Copy, Clone)]
-pub enum DT { // Data types
-    RebillDataHeader,
-    RebillData,
-}
-
-#[derive(Copy, Clone)]
-#[repr(packed)]
-pub struct RebillDataHeader {
-    pub data_type: AccountDataType,
-    pub subscr_data: Pubkey,            // The subscription data account this rebill data is associated with
-    pub manager_key: Pubkey,            // The rebill manager account being assigned
-    pub manager_approval: Pubkey,       // The rebill manager approval from the network authority
-    pub prev_data: Option<Pubkey>,      // The previous subscription data
-    pub next_data: Option<Pubkey>,      // The next subscription data
-}
-unsafe impl Zeroable for RebillDataHeader {}
-unsafe impl Pod for RebillDataHeader {}
-
-impl RebillDataHeader {
-    pub fn check_data_type(&self, check: AccountDataType) -> ProgramResult {
-        if self.data_type != check {
-            msg!("Error: Invalid data type for RebillData");
-            return Err(ErrorCode::InvalidDataType.into());
-        }
-        Ok(())
-    }
-
-    pub fn subscr_data(&self) -> Pubkey {
-        self.subscr_data
-    }
-
-    pub fn manager_key(&self) -> Pubkey {
-        self.manager_key
-    }
-
-    pub fn manager_approval(&self) -> Pubkey {
-        self.manager_approval
-    }
-}
-
-#[derive(Copy, Clone)]
-#[repr(packed)]
-pub struct RebillData {
-    pub event_uuid: u128,
-    pub event_ts: i64,          // The UTC timestamp when the event is being processed
-    pub rebill_ts: i64,         // The UTC timestamp that corresponds to the first second of the rebill period
-    pub rebill_str: [u8; 32],   // The rebill datestamp string
-    pub rebill_strlen: u8,      // The length of the rebill datestamp string
-    pub manager_key: Pubkey,    // The public key of the manager doing the rebill
-    pub amount: u64,            // The rebill amount in raw tokens (same decimals as the token mint)
-}
-unsafe impl Zeroable for RebillData {}
-unsafe impl Pod for RebillData {}
-
-impl RebillData {
-    pub fn event_uuid(&self) -> u128 {
-        self.event_uuid
-    }
-
-    pub fn event_ts(&self) -> i64 {
-        self.event_ts
-    }
-
-    pub fn rebill_ts(&self) -> i64 {
-        self.rebill_ts
-    }
-
-    pub fn rebill_str(&self) -> String {
-        let rbslc = &self.rebill_str[0..self.rebill_strlen as usize];
-        String::from_utf8(rbslc.to_vec()).expect("Invalid utf8 string")
-    }
-
-    pub fn manager_key(&self) -> Pubkey {
-        self.manager_key
-    }
-
-    pub fn amount(&self) -> u64 {
-        self.amount
-    }
 }
 
 pub fn get_period_string(ts: i64, period: SubscriptionPeriod) -> FnResult<String, ProgramError> {
@@ -224,9 +117,10 @@ mod token_agent {
         // TODO: network authority approvals
         subscr.user_key = *ctx.accounts.user_key.to_account_info().key;
         subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
+        subscr.manager_key = *ctx.accounts.manager_key.to_account_info().key;
+        subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
         subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
-        subscr.rebill_data = *ctx.accounts.rebill_data.to_account_info().key;
         subscr.rebill_events = 0;
         subscr.rebill_max = inp_rebill_max;
         subscr.next_rebill = inp_next_rebill;
@@ -239,24 +133,6 @@ mod token_agent {
         subscr.pause_enabled = inp_pause_enabled;
         subscr.paused = false;
         subscr.active = true;
-
-        // Create rebill data
-        let rbdata: &mut[u8] = &mut ctx.accounts.rebill_data.try_borrow_mut_data()?;
-        let pt = SlabPageAlloc::new(rbdata);
-        pt.setup_page_table();
-        pt.allocate::<SlabVec, RebillDataHeader>(DT::RebillDataHeader as u16, 1).expect("Failed to allocate");
-        pt.allocate::<CritMap, RebillData>(DT::RebillData as u16, MAX_REBILL_ENTRIES as usize).expect("Failed to allocate");
-        let mut rebill_header_vec = SlabVec::new();
-        let rebill_header = RebillDataHeader {
-            data_type: AccountDataType::RebillData,
-            subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
-            manager_key: *ctx.accounts.manager_key.to_account_info().key,
-            manager_approval: *ctx.accounts.manager_approval.to_account_info().key,
-            next_data: None,
-            prev_data: None,
-        };
-        *pt.index_mut::<RebillDataHeader>(DT::RebillDataHeader as u16, rebill_header_vec.next_index() as usize) = rebill_header;
-        *pt.header_mut::<SlabVec>(DT::RebillDataHeader as u16) = rebill_header_vec;
 
         // TODO: Log event
 
@@ -283,36 +159,25 @@ mod token_agent {
         msg!("Clock Timestamp: {}", ts.to_string());
 
         // Validate accounts
-        let rbdata: &mut[u8] = &mut ctx.accounts.rebill_data.try_borrow_mut_data()?;
-        let pt = SlabPageAlloc::new(rbdata);
-        let rbhead = pt.index_mut::<RebillDataHeader>(DT::RebillDataHeader as u16, 0);
-        if rbhead.subscr_data() != *ctx.accounts.subscr_data.to_account_info().key {
-            msg!("Invalid account: subscr_data does not match rebill data");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if rbhead.manager_key() != *ctx.accounts.manager_key.to_account_info().key {
-            msg!("Invalid account: manager_key does not match rebill data");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if rbhead.manager_approval() != *ctx.accounts.manager_approval.to_account_info().key {
-            msg!("Invalid account: manager_approval does not match rebill data");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
+        // TODO: Ensure account owner programs
         let subscr = &mut ctx.accounts.subscr_data;
+        if subscr.manager_key != *ctx.accounts.manager_key.to_account_info().key {
+            msg!("Invalid account: manager_key does not match subscription");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
+        if subscr.manager_approval != *ctx.accounts.manager_approval.to_account_info().key {
+            msg!("Invalid account: manager_approval does not match subscription");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
+        // TODO: Ensure manager_approval matches manager
         if !subscr.active {
             msg!("Inactive subscription");
             return Err(ErrorCode::InactiveSubscription.into());
-        }
-        if subscr.rebill_data != *ctx.accounts.rebill_data.to_account_info().key {
-            msg!("Invalid account: rebill_data does not match subscription");
-            return Err(ErrorCode::InvalidAccount.into());
         }
         if subscr.rebill_max > 0 && subscr.rebill_max >= subscr.rebill_events {
             msg!("Maximum rebills reached");
             return Err(ErrorCode::MaxRebills.into());
         }
-        // TODO: Ensure manager_approval matches merchant
-        // TODO: Ensure account owner programs
 
         // Validate timeframe
         let period = SubscriptionPeriod::try_from_primitive(subscr.period);
@@ -361,18 +226,8 @@ mod token_agent {
             msg!("Next rebill out of sequence");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
-        // Check for duplicates
-        let eventhash: u128 = CritMap::bytes_hash(inp_rebill_str.as_bytes());
-        msg!("Event {} -> {}", inp_rebill_str, eventhash.to_string());
 
-        let cm = CritMap { slab: pt, type_id: DT::RebillData as u16, capacity: MAX_REBILL_ENTRIES };
-        let rf = cm.get_key(eventhash);
-        if rf != None {
-            msg!("Duplicate rebill");
-            return Err(ErrorCode::DuplicateRebill.into());
-        } else {
-            msg!("Add Rebill Entry!");
-        }
+        msg!("Rebill ready!");
 
         // Update parameters
         subscr.next_rebill = inp_next_rebill;
@@ -409,16 +264,12 @@ pub struct CreateSubscr<'info> {
     pub user_key: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
     pub token_account: AccountInfo<'info>,
-    #[account(init)]
-    pub rebill_data: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
 pub struct ProcessSubscr<'info> {
     #[account(mut)]
     pub subscr_data: ProgramAccount<'info, SubscrData>,
-    #[account(mut)]
-    pub rebill_data: AccountInfo<'info>,
     #[account(signer)]
     pub manager_key: AccountInfo<'info>,
     pub manager_approval: AccountInfo<'info>,
@@ -426,12 +277,13 @@ pub struct ProcessSubscr<'info> {
 
 #[account]
 pub struct SubscrData {
-    pub data_type: u8,                  // AccountDataType to prevent mixing and matching of data
+    pub user_key: Pubkey,               // The user that owns this subscription
     //pub approval_program: Pubkey,       // The address of the network authority program that signs approvals
     pub merchant_key: Pubkey,           // The merchant account that receives subscription payments
     pub merchant_approval: Pubkey,      // The merchant approval record from the network authority
     //pub abort_authority: Pubkey,        // The abort authority from the network authority to abort in case of hacks
-    pub user_key: Pubkey,               // The user that owns this subscription
+    pub manager_key: Pubkey,            // The rebill manager account being assigned
+    pub manager_approval: Pubkey,       // The rebill manager approval from the network authority
     pub token_mint: Pubkey,             // The token mint to pay for the subscription
     pub token_account: Pubkey,          // The token account to pay for the subscription
     pub rebill_data: Pubkey,            // The rebill data account to track subscription rebills and prevent duplicates
@@ -456,7 +308,6 @@ pub struct SubscrData {
 
 #[account]
 pub struct TokenAllowance {
-    pub data_type: u8,                  // AccountDataType to prevent mixing and matching of data
     //pub abort_authority: Pubkey,        // The abort authority from the network authority to abort in case of hacks
     pub user_key: Pubkey,               // The user that owns the tokens
     pub delegate_key: Pubkey,           // The delegate granted an allowance of tokens to transfer

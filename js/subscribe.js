@@ -24,10 +24,6 @@ async function main() {
     const managerAP = anchor.web3.Keypair.generate()
     const tokenMint = new PublicKey('7KCJVP436UCWf4qT4Nc6ora62ZqsYtadyft47QLmFUHL')
     const tokenAccount = new PublicKey('44EkCqNcJJZA7h5aaPDTnmj1cuLgigdxUbXdhpBX58nk')
-    const rebillData = anchor.web3.Keypair.generate()
-    const rebillDataBytes = 58 + (256 * 3)
-    const rebillDataRent = await provider.connection.getMinimumBalanceForRentExemption(rebillDataBytes)
-    console.log('Rebill Data Rent: ' + rebillDataRent)
     const tx = new anchor.web3.Transaction()
     tx.add(
         anchor.web3.SystemProgram.createAccount({
@@ -39,17 +35,7 @@ async function main() {
         })
     )
     await provider.send(tx, [subscrData])
-    const tx2 = new anchor.web3.Transaction()
-    tx2.add(
-        anchor.web3.SystemProgram.createAccount({
-            fromPubkey: provider.wallet.publicKey,
-            newAccountPubkey: rebillData.publicKey,
-            space: rebillDataBytes,
-            lamports: rebillDataRent,
-            programId: tokenAgentPK,
-        })
-    )
-    await provider.send(tx2, [rebillData])
+
     console.log('Subscribe')
     var dt0 = DateTime.now().setZone('utc')
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
@@ -73,8 +59,7 @@ async function main() {
                 managerApproval: managerAP.publicKey,
                 userKey: provider.wallet.publicKey,
                 tokenMint: tokenMint,
-                tokenAccount: tokenAccount,
-                rebillData: rebillData.publicKey
+                tokenAccount: tokenAccount
             }
         }
     )
@@ -93,7 +78,6 @@ async function main() {
         {
             accounts: {
                 subscrData: subscrData.publicKey,
-                rebillData: rebillData.publicKey,
                 managerKey: managerPK.publicKey,
                 managerApproval: managerAP.publicKey
             }
@@ -115,7 +99,6 @@ async function main() {
         {
             accounts: {
                 subscrData: subscrData.publicKey,
-                rebillData: rebillData.publicKey,
                 managerKey: managerPK.publicKey,
                 managerApproval: managerAP.publicKey
             }
