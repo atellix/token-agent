@@ -10,8 +10,7 @@ const provider = anchor.Provider.local()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
 const tokenAgentPK = tokenAgent.programId
-
-console.log(tokenAgent)
+//console.log(tokenAgent)
 
 async function main() {
     const subscrId = uuidv4()
@@ -52,15 +51,19 @@ async function main() {
     )
     await provider.send(tx2, [rebillData])
     console.log('Subscribe')
+    var dt0 = DateTime.now().setZone('utc')
+    dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
+    var dts0 = dt0.toFormat("yyyyLL")
+    console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
     await tokenAgent.rpc.createSubscription(
-        new anchor.BN(uuidparse(subscrId)), // inp_subscr_uuid
-        2,                                  // inp_period
-        new anchor.BN(10000),               // inp_budget
-        false,                              // inp_pause_enabled
-        0,                                  // inp_rebill_max
-        new anchor.BN(60 * 60 * 24 * 7),    // inp_max_delay
-        new anchor.BN(0),                   // inp_not_valid_before
-        new anchor.BN(0),                   // inp_not_valid_after
+        new anchor.BN(uuidparse(subscrId)),             // inp_subscr_uuid
+        2,                                              // inp_period (2 = monthly)
+        new anchor.BN(10000),                           // inp_budget
+        new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_next_rebill
+        false,                                          // inp_pause_enabled
+        0,                                              // inp_rebill_max
+        new anchor.BN(0),                               // inp_not_valid_before
+        new anchor.BN(0),                               // inp_not_valid_after
         {
             accounts: {
                 subscrData: subscrData.publicKey,
@@ -76,14 +79,17 @@ async function main() {
         }
     )
 
-    console.log('Process')
-    const eventId = uuidv4()
-    const unixTs = Math.floor(DateTime.now().toSeconds())
+    console.log('Process 1')
+    var eventId = uuidv4()
+    var dt1 = dt0.plus({ months: 1 })
+    var dts1 = dt1.toFormat("yyyyLL")
+    console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO())
     const tx3 = await tokenAgent.transaction.processSubscription(
-        new anchor.BN(uuidparse(eventId)),  // inp_event_uuid
-        new anchor.BN(unixTs),              // inp_rebill_ts
-        "Hello",                            // inp_rebill_str
-        new anchor.BN(5000),                // inp_amount
+        new anchor.BN(uuidparse(eventId)),              // inp_event_uuid
+        new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
+        dts0,                                           // inp_rebill_str
+        new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
+        new anchor.BN(5000),                            // inp_amount
         {
             accounts: {
                 subscrData: subscrData.publicKey,
@@ -94,6 +100,29 @@ async function main() {
         }
     )
     await provider.send(tx3, [managerPK])
+
+    console.log('Process 2')
+    eventId = uuidv4()
+    dt1 = dt0.plus({ months: 1 })
+    dts1 = dt1.toFormat("yyyyLL")
+    console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO())
+    const tx4 = await tokenAgent.transaction.processSubscription(
+        new anchor.BN(uuidparse(eventId)),              // inp_event_uuid
+        new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
+        dts0,                                           // inp_rebill_str
+        new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
+        new anchor.BN(5000),                            // inp_amount
+        {
+            accounts: {
+                subscrData: subscrData.publicKey,
+                rebillData: rebillData.publicKey,
+                managerKey: managerPK.publicKey,
+                managerApproval: managerAP.publicKey
+            }
+        }
+    )
+    await provider.send(tx4, [managerPK])
+
 }
 
 console.log('Begin')

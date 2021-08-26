@@ -38,7 +38,7 @@ pub enum Status { // Status types
 }
 
 #[repr(u8)]
-#[derive(PartialEq, Debug, Eq, Copy, Clone)]
+#[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
 pub enum SubscriptionPeriod {
     Daily,
     Weekly,
@@ -157,12 +157,66 @@ mod token_agent {
         inp_subscr_uuid: u128,
         inp_period: u8,
         inp_budget: u64,
+        inp_next_rebill: i64,
         inp_pause_enabled: bool,
         inp_rebill_max: u32,
-        inp_max_delay: u64,
-        inp_not_valid_before: u64,
-        inp_not_valid_after: u64,
+        inp_not_valid_before: i64,
+        inp_not_valid_after: i64,
     ) -> ProgramResult {
+        let clock = Clock::get()?;
+        let ts = clock.unix_timestamp;
+
+        // Verify input
+        let period = SubscriptionPeriod::try_from_primitive(inp_period);
+        if period.is_err() {
+            msg!("Invalid subscription period");
+            return Err(ErrorCode::InvalidSubscriptionPeriod.into());
+        }
+        let max_delay: i64 = match period.unwrap() {                // Delay from start of billing cycle to accept rebills
+            SubscriptionPeriod::Daily => (60 * 60 * 48),            // 2 days
+            SubscriptionPeriod::Weekly => (60 * 60 * 24 * 14),      // 2 weeks
+            SubscriptionPeriod::Monthly => (60 * 60 * 24 * 60),     // ~2 months
+            SubscriptionPeriod::Quarterly => (60 * 60 * 24 * 180),  // ~2 quarters
+            SubscriptionPeriod::Yearly => (60 * 60 * 24 * 365 * 2), // ~2 years
+        };
+        if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
+            msg!("Invalid subscription start");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_after < 0 || (inp_not_valid_after > 0 && inp_not_valid_after < ts) {
+            msg!("Invalid subscription end");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_after != 0 && inp_not_valid_before != 0 {
+            if inp_not_valid_after <= inp_not_valid_before {
+                msg!("Invalid timeframe");
+                return Err(ErrorCode::InvalidTimeframe.into());
+            }
+        }
+        if inp_next_rebill < 0 {
+            msg!("Invalid negative next_rebill");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_before > 0 && inp_next_rebill < inp_not_valid_before {
+            msg!("Next rebill is before start");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        let mut timeframe_start: i64 = ts;
+        if inp_not_valid_before > 0 {
+            timeframe_start = inp_not_valid_before;
+        }
+        let timeframe_end = timeframe_start.checked_add(max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        if inp_next_rebill < timeframe_start || inp_next_rebill > timeframe_end {
+            msg!("Next rebill not within timeframe");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        let d1 = get_period_string(inp_next_rebill, period.unwrap())?;
+        let prev_period = inp_next_rebill.checked_sub(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let d2 = get_period_string(prev_period, period.unwrap())?;
+        if d1 == d2 {
+            msg!("Next rebill not beginning of period");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
         // Setup up token delegate if needed
 
         // Create subscription data
@@ -173,14 +227,18 @@ mod token_agent {
         subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
         subscr.rebill_data = *ctx.accounts.rebill_data.to_account_info().key;
+        subscr.rebill_events = 0;
         subscr.rebill_max = inp_rebill_max;
-        subscr.max_delay = inp_max_delay;
+        subscr.next_rebill = inp_next_rebill;
+        subscr.max_delay = max_delay;
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.subscr_uuid = inp_subscr_uuid;
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.pause_enabled = inp_pause_enabled;
+        subscr.paused = false;
+        subscr.active = true;
 
         // Create rebill data
         let rbdata: &mut[u8] = &mut ctx.accounts.rebill_data.try_borrow_mut_data()?;
@@ -217,34 +275,108 @@ mod token_agent {
         inp_event_uuid: u128,
         inp_rebill_ts: i64,
         inp_rebill_str: String,
+        inp_next_rebill: i64,
         inp_amount: u64,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
         msg!("Clock Timestamp: {}", ts.to_string());
 
-        let d1 = get_period_string(ts, SubscriptionPeriod::Daily)?;
-        msg!("Daily: {}", d1.to_string());
-        let d2 = get_period_string(ts, SubscriptionPeriod::Weekly)?;
-        msg!("Weekly: {}", d2.to_string());
-        let d3 = get_period_string(ts, SubscriptionPeriod::Monthly)?;
-        msg!("Monthly: {}", d3.to_string());
-        let d4 = get_period_string(ts, SubscriptionPeriod::Quarterly)?;
-        msg!("Quarterly: {}", d4.to_string());
-        let d5 = get_period_string(ts, SubscriptionPeriod::Yearly)?;
-        msg!("Yearly: {}", d5.to_string());
-
-        /* let dt = NaiveDateTime::from_timestamp(ts, 0);
-        let q = (dt.date().month() / 3).checked_add(1);
-        if q == None {
-            msg!("Overflow");
-            return Err(ErrorCode::Overflow.into());
+        // Validate accounts
+        let rbdata: &mut[u8] = &mut ctx.accounts.rebill_data.try_borrow_mut_data()?;
+        let pt = SlabPageAlloc::new(rbdata);
+        let rbhead = pt.index_mut::<RebillDataHeader>(DT::RebillDataHeader as u16, 0);
+        if rbhead.subscr_data() != *ctx.accounts.subscr_data.to_account_info().key {
+            msg!("Invalid account: subscr_data does not match rebill data");
+            return Err(ErrorCode::InvalidAccount.into());
         }
-        msg!("Day: {}", dt.format("%Y%m%d").to_string());
-        msg!("Week: {}", dt.format("%Yw%U").to_string());
-        msg!("Month: {}", dt.format("%Y%m").to_string());
-        msg!("Quarter: {}q{}", dt.format("%Y").to_string(), q.unwrap().to_string());
-        msg!("Year: {}", dt.format("%Y").to_string()); */
+        if rbhead.manager_key() != *ctx.accounts.manager_key.to_account_info().key {
+            msg!("Invalid account: manager_key does not match rebill data");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
+        if rbhead.manager_approval() != *ctx.accounts.manager_approval.to_account_info().key {
+            msg!("Invalid account: manager_approval does not match rebill data");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
+        let subscr = &mut ctx.accounts.subscr_data;
+        if !subscr.active {
+            msg!("Inactive subscription");
+            return Err(ErrorCode::InactiveSubscription.into());
+        }
+        if subscr.rebill_data != *ctx.accounts.rebill_data.to_account_info().key {
+            msg!("Invalid account: rebill_data does not match subscription");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
+        if subscr.rebill_max > 0 && subscr.rebill_max >= subscr.rebill_events {
+            msg!("Maximum rebills reached");
+            return Err(ErrorCode::MaxRebills.into());
+        }
+        // TODO: Ensure manager_approval matches merchant
+        // TODO: Ensure account owner programs
+
+        // Validate timeframe
+        let period = SubscriptionPeriod::try_from_primitive(subscr.period);
+        if period.is_err() {
+            msg!("Invalid subscription period");
+            return Err(ErrorCode::InvalidSubscriptionPeriod.into());
+        }
+        if subscr.not_valid_before > 0 && ts < subscr.not_valid_before {
+            msg!("Subscription not valid yet");
+            return Err(ErrorCode::NotValidYet.into());
+        }
+        if subscr.not_valid_after > 0 && ts > subscr.not_valid_after {
+            msg!("Subscription expired");
+            return Err(ErrorCode::SubscriptionExpired.into());
+        }
+        if inp_rebill_ts < 0 {
+            msg!("Invalid negative rebill timestamp");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if ts < inp_rebill_ts && false { // <=== TESTING ONLY !!! REMOVE BEFORE LAUNCH !!!{
+            msg!("Invalid rebill timestamp after current time");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if subscr.next_rebill != inp_rebill_ts {
+            msg!("Rebill timestamp does not match subscription");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        let timeframe_end = inp_rebill_ts.checked_add(subscr.max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        if ts > timeframe_end {
+            msg!("Rebill expired");
+            return Err(ErrorCode::RebillExpired.into());
+        }
+        let d1 = get_period_string(inp_rebill_ts, period.unwrap())?;
+        if inp_rebill_str != d1 {   
+            msg!("Invalid rebill period string");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        let d2 = get_period_string(inp_next_rebill, period.unwrap())?;
+        let prev_period = inp_next_rebill.checked_sub(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let d3 = get_period_string(prev_period, period.unwrap())?;
+        if d2 == d3 {
+            msg!("Next rebill not beginning of period");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if d1 != d3 {
+            msg!("Next rebill out of sequence");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        // Check for duplicates
+        let eventhash: u128 = CritMap::bytes_hash(inp_rebill_str.as_bytes());
+        msg!("Event {} -> {}", inp_rebill_str, eventhash.to_string());
+
+        let cm = CritMap { slab: pt, type_id: DT::RebillData as u16, capacity: MAX_REBILL_ENTRIES };
+        let rf = cm.get_key(eventhash);
+        if rf != None {
+            msg!("Duplicate rebill");
+            return Err(ErrorCode::DuplicateRebill.into());
+        } else {
+            msg!("Add Rebill Entry!");
+        }
+
+        // Update parameters
+        subscr.next_rebill = inp_next_rebill;
+        subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
         Ok(())
     }
 
@@ -306,14 +438,16 @@ pub struct SubscrData {
     // Subscription details below
     pub rebill_events: u32,             // Count of rebill events
     pub rebill_max: u32,                // Maximum number of times to rebill (0 = unlimited)
-    pub not_valid_before: u64,          // UTC timestamp before which no subscription processing can occur
-    pub not_valid_after: u64,           // UTC timestamp after which no subscription processing can occur
-    pub max_delay: u64,                 // The number of seconds after the start of the rebill period the manager can be delayed in attempting to rebill
+    pub next_rebill: i64,               // The start of the next rebilling period (actual rebilling may happen later)
+    pub not_valid_before: i64,          // UTC timestamp before which no subscription processing can occur
+    pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
+    pub max_delay: i64,                 // The number of seconds after the start of the rebill period the manager can be delayed in attempting to rebill
     pub subscr_uuid: u128,              // Subscription UUID
     pub period: u8,                     // Subscription rebill period
     pub budget: u64,                    // Subscription budget (maximum amount, not necessarily the amount that will be billed which could be less)
     pub pause_enabled: bool,            // Subscription able to be paused
     pub paused: bool,                   // Subscription is paused
+    pub active: bool,                   // Subscription is active
 }
 
 // TODO: Merchant approval
@@ -329,8 +463,8 @@ pub struct TokenAllowance {
     pub recipient_key: Option<Pubkey>,  // Optional recipient key to limit where tokens can be transferred to
     pub token_mint: Pubkey,             // The token mint for the allowance
     pub token_account: Pubkey,          // The token account for the allowance
-    pub not_valid_before: u64,          // UTC timestamp before which no subscription processing can occur
-    pub not_valid_after: u64,           // UTC timestamp after which no subscription processing can occur
+    pub not_valid_before: i64,          // UTC timestamp before which no subscription processing can occur
+    pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
     pub amount: u64,                    // The amount of tokens for the allowance (same decimals as underlying token)
 }
 
@@ -338,8 +472,28 @@ pub struct TokenAllowance {
 pub enum ErrorCode {
     #[msg("Access denied")]
     AccessDenied,
+    #[msg("Invalid subscription period")]
+    InactiveSubscription,
+    #[msg("Invalid subscription period")]
+    InvalidSubscriptionPeriod,
+    #[msg("Invalid max delay")]
+    InvalidMaxDelay,
+    #[msg("Invalid timeframe")]
+    InvalidTimeframe,
     #[msg("Invalid data type")]
     InvalidDataType,
+    #[msg("Invalid account")]
+    InvalidAccount,
+    #[msg("Subscription not valid yet")]
+    NotValidYet,
+    #[msg("Subscription expired")]
+    SubscriptionExpired,
+    #[msg("Rebill expired")]
+    RebillExpired,
+    #[msg("Maximum rebills reached")]
+    DuplicateRebill,
+    #[msg("Duplicate rebill")]
+    MaxRebills,
     #[msg("Overflow")]
     Overflow,
 }
