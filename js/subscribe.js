@@ -12,6 +12,19 @@ const tokenAgent = anchor.workspace.TokenAgent
 const tokenAgentPK = tokenAgent.programId
 //console.log(tokenAgent)
 
+const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+async function associatedTokenAddress(walletAddress, tokenMintAddress) {
+    console.log(walletAddress)
+    console.log(TOKEN_PROGRAM_ID)
+    console.log(tokenMintAddress)
+    const addr = await PublicKey.findProgramAddress(
+        [walletAddress.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), tokenMintAddress.toBuffer()],
+        SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID
+    )
+    const res = { 'pubkey': await addr[0].toString(), 'nonce': addr[1] }
+    return res
+}
+
 async function main() {
     const subscrId = uuidv4()
     const subscrData = anchor.web3.Keypair.generate()
@@ -37,11 +50,13 @@ async function main() {
     await provider.send(tx, [subscrData])
 
     console.log('Subscribe')
+    const merchantTK = await associatedTokenAddress(merchantPK.publicKey, tokenMint)
     var dt0 = DateTime.now().setZone('utc')
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
     var dts0 = dt0.toFormat("yyyyLL")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
     await tokenAgent.rpc.createSubscription(
+        merchantTK.nonce,
         new anchor.BN(uuidparse(subscrId)),             // inp_subscr_uuid
         2,                                              // inp_period (2 = monthly)
         new anchor.BN(10000),                           // inp_budget
@@ -55,6 +70,7 @@ async function main() {
                 subscrData: subscrData.publicKey,
                 merchantKey: merchantPK.publicKey,
                 merchantApproval: merchantAP.publicKey,
+                merchantToken: new PublicKey(merchantTK.pubkey),
                 managerKey: managerPK.publicKey,
                 managerApproval: managerAP.publicKey,
                 userKey: provider.wallet.publicKey,
@@ -87,14 +103,14 @@ async function main() {
 
     console.log('Process 2')
     eventId = uuidv4()
-    dt1 = dt0.plus({ months: 1 })
-    dts1 = dt1.toFormat("yyyyLL")
-    console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO())
+    dt2 = dt1.plus({ months: 1 })
+    dts2 = dt2.toFormat("yyyyLL")
+    console.log('Next Rebill: ' + dts2 + ' - ' + dt2.toISO())
     const tx4 = await tokenAgent.transaction.processSubscription(
         new anchor.BN(uuidparse(eventId)),              // inp_event_uuid
-        new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
-        dts0,                                           // inp_rebill_str
-        new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
+        new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_rebill_ts
+        dts1,                                           // inp_rebill_str
+        new anchor.BN(Math.floor(dt2.toSeconds())),     // inp_next_rebill
         new anchor.BN(5000),                            // inp_amount
         {
             accounts: {

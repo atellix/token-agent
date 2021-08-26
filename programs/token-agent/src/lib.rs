@@ -1,6 +1,5 @@
 //use uuid::Uuid;
-use std::{ string::String, mem::size_of, io::Cursor, result::Result as FnResult };
-//use byte_slice_cast::*;
+use std::{ string::String, mem::size_of, io::Cursor, result::Result as FnResult, str::FromStr };
 use bytemuck::{ Pod, Zeroable };
 use num_enum::TryFromPrimitive;
 use chrono::{ NaiveDateTime, Datelike };
@@ -47,6 +46,7 @@ mod token_agent {
 //      initial_payment: bool,
 //      initial_amount: u64,
 //      initial_uuid: u64,
+        inp_nonce: u8,
         inp_subscr_uuid: u128,
         inp_period: u8,
         inp_budget: u64,
@@ -110,6 +110,23 @@ mod token_agent {
             msg!("Next rebill not beginning of period");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
+
+        // Verify merchant associated token
+        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
+        let derived_key = Pubkey::create_program_address(
+            &[
+                &ctx.accounts.merchant_key.to_account_info().key.to_bytes(),
+                &spl_token.to_bytes(),
+                &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                &[inp_nonce]
+            ],
+            &asc_token
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_key != *ctx.accounts.merchant_token.to_account_info().key {
+            msg!("Invalid merchant token account");
+            return Err(ErrorCode::InvalidTokenAccount.into());
+        }
         // Setup up token delegate if needed
 
         // Create subscription data
@@ -117,6 +134,7 @@ mod token_agent {
         // TODO: network authority approvals
         subscr.user_key = *ctx.accounts.user_key.to_account_info().key;
         subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
+        subscr.merchant_token = *ctx.accounts.merchant_token.to_account_info().key;
         subscr.manager_key = *ctx.accounts.manager_key.to_account_info().key;
         subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
         subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
@@ -128,6 +146,7 @@ mod token_agent {
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.subscr_uuid = inp_subscr_uuid;
+        subscr.rebill_uuid = 0;
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.pause_enabled = inp_pause_enabled;
@@ -148,7 +167,7 @@ mod token_agent {
     } */
 
     pub fn process_subscription(ctx: Context<ProcessSubscr>,
-        inp_event_uuid: u128,
+        inp_rebill_uuid: u128,
         inp_rebill_ts: i64,
         inp_rebill_str: String,
         inp_next_rebill: i64,
@@ -231,6 +250,7 @@ mod token_agent {
 
         // Update parameters
         subscr.next_rebill = inp_next_rebill;
+        subscr.rebill_uuid = inp_rebill_uuid;
         subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
         Ok(())
     }
@@ -255,6 +275,7 @@ pub struct CreateSubscr<'info> {
     pub subscr_data: ProgramAccount<'info, SubscrData>,
     pub merchant_key: AccountInfo<'info>,
     pub merchant_approval: AccountInfo<'info>,
+    pub merchant_token: AccountInfo<'info>,
     pub manager_key: AccountInfo<'info>,
     //pub merchant_approval: ProgramAccount<'info, MerchantApproval>,
     pub manager_approval: AccountInfo<'info>,
@@ -281,6 +302,7 @@ pub struct SubscrData {
     //pub approval_program: Pubkey,       // The address of the network authority program that signs approvals
     pub merchant_key: Pubkey,           // The merchant account that receives subscription payments
     pub merchant_approval: Pubkey,      // The merchant approval record from the network authority
+    pub merchant_token: Pubkey,         // The merchant associated token account to receive payments for this token
     //pub abort_authority: Pubkey,        // The abort authority from the network authority to abort in case of hacks
     pub manager_key: Pubkey,            // The rebill manager account being assigned
     pub manager_approval: Pubkey,       // The rebill manager approval from the network authority
@@ -295,6 +317,7 @@ pub struct SubscrData {
     pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
     pub max_delay: i64,                 // The number of seconds after the start of the rebill period the manager can be delayed in attempting to rebill
     pub subscr_uuid: u128,              // Subscription UUID
+    pub rebill_uuid: u128,              // Last Rebill UUID
     pub period: u8,                     // Subscription rebill period
     pub budget: u64,                    // Subscription budget (maximum amount, not necessarily the amount that will be billed which could be less)
     pub pause_enabled: bool,            // Subscription able to be paused
@@ -329,12 +352,16 @@ pub enum ErrorCode {
     InvalidSubscriptionPeriod,
     #[msg("Invalid max delay")]
     InvalidMaxDelay,
+    #[msg("Invalid token account")]
+    InvalidTokenAccount,
     #[msg("Invalid timeframe")]
     InvalidTimeframe,
     #[msg("Invalid data type")]
     InvalidDataType,
     #[msg("Invalid account")]
     InvalidAccount,
+    #[msg("Invalid nonce")]
+    InvalidNonce,
     #[msg("Subscription not valid yet")]
     NotValidYet,
     #[msg("Subscription expired")]
