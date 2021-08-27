@@ -1,14 +1,15 @@
 //use uuid::Uuid;
-use std::{ string::String, mem::size_of, io::Cursor, result::Result as FnResult, str::FromStr };
-use bytemuck::{ Pod, Zeroable };
+use std::{ string::String, result::Result as FnResult, str::FromStr };
+//use bytemuck::{ Pod, Zeroable };
 use num_enum::TryFromPrimitive;
 use chrono::{ NaiveDateTime, Datelike };
 use anchor_lang::prelude::*;
-use anchor_spl::token::{ self, Transfer, TokenAccount, Approve };
+use anchor_spl::token::{ self, Transfer, Approve };
 use solana_program::{
-    program::{ invoke_signed },
+    sysvar,
+    instruction::{AccountMeta, Instruction},
+    program::{ invoke },
     account_info::AccountInfo,
-    system_instruction,
     clock::Clock,
 };
 
@@ -41,12 +42,11 @@ pub fn get_period_string(ts: i64, period: SubscriptionPeriod) -> FnResult<String
 mod token_agent {
     use super::*;
 
-    pub fn create_subscription(ctx: Context<CreateSubscr>,
-//      link_token: bool,
-//      initial_payment: bool,
-//      initial_amount: u64,
-//      initial_uuid: u64,
-        inp_nonce: u8,
+    pub fn subscribe(ctx: Context<CreateSubscr>,
+        link_token: bool,
+        initial_amount: u64,
+        inp_user_nonce: u8,
+        inp_merchant_nonce: u8,
         inp_subscr_uuid: u128,
         inp_period: u8,
         inp_budget: u64,
@@ -58,6 +58,11 @@ mod token_agent {
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
+
+        if *ctx.program_id != *ctx.accounts.token_agent.to_account_info().key {
+            msg!("Invalid program id");
+            return Err(ErrorCode::InvalidProgramId.into());
+        }
 
         // Verify input
         let period = SubscriptionPeriod::try_from_primitive(inp_period);
@@ -111,28 +116,75 @@ mod token_agent {
             return Err(ErrorCode::InvalidTimeframe.into());
         }
 
+        // Verify user associated token
+        let derived_user_key = Pubkey::create_program_address(
+            &[
+                &ctx.accounts.user_key.to_account_info().key.to_bytes(),
+                &[inp_user_nonce]
+            ],
+            ctx.program_id
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
+            msg!("Invalid merchant token account");
+            return Err(ErrorCode::InvalidTokenAccount.into());
+        }
+
         // Verify merchant associated token
         let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
         let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
-        let derived_key = Pubkey::create_program_address(
+        let derived_merchant_key = Pubkey::create_program_address(
             &[
                 &ctx.accounts.merchant_key.to_account_info().key.to_bytes(),
                 &spl_token.to_bytes(),
                 &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
-                &[inp_nonce]
+                &[inp_merchant_nonce]
             ],
             &asc_token
         ).map_err(|_| ErrorCode::InvalidNonce)?;
-        if derived_key != *ctx.accounts.merchant_token.to_account_info().key {
+        if derived_merchant_key != *ctx.accounts.merchant_token.to_account_info().key {
             msg!("Invalid merchant token account");
             return Err(ErrorCode::InvalidTokenAccount.into());
         }
+
+        if spl_token != *ctx.accounts.token_program.to_account_info().key {
+            msg!("Invalid token program id");
+            return Err(ErrorCode::InvalidProgramId.into());
+        }
+
         // Setup up token delegate if needed
+        if link_token {
+            let cpi_accounts = Approve {
+                to: ctx.accounts.token_account.to_account_info(),
+                delegate: ctx.accounts.user_agent.to_account_info(),
+                authority: ctx.accounts.user_key.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+            token::approve(cpi_ctx, u64::MAX)?;
+        }
+
+        // Perform transfer
+        if initial_amount > 0 {
+            let seeds = &[
+                ctx.accounts.user_key.to_account_info().key.as_ref(),
+                &[inp_user_nonce],
+            ];
+            let signer = &[&seeds[..]];
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.token_account.to_account_info(),
+                to: ctx.accounts.merchant_token.to_account_info(),
+                authority: ctx.accounts.user_agent.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+            token::transfer(cpi_ctx, initial_amount)?;
+        }
 
         // Create subscription data
         let subscr = &mut ctx.accounts.subscr_data;
         // TODO: network authority approvals
         subscr.user_key = *ctx.accounts.user_key.to_account_info().key;
+        subscr.user_agent = *ctx.accounts.user_agent.to_account_info().key;
         subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
         subscr.merchant_token = *ctx.accounts.merchant_token.to_account_info().key;
         subscr.manager_key = *ctx.accounts.manager_key.to_account_info().key;
@@ -155,6 +207,73 @@ mod token_agent {
 
         // TODO: Log event
 
+        Ok(())
+    }
+
+    pub fn fund_token(ctx: Context<FundToken>, inp_nonce: u8) -> ProgramResult {
+        // Accounts
+        let av = ctx.remaining_accounts;
+        let funding_account = av.get(0).unwrap();
+        let token_mint = av.get(1).unwrap();
+        let token_owner = av.get(2).unwrap();
+        let token_account = av.get(3).unwrap();
+        let token_program = av.get(4).unwrap();
+        let system_program = av.get(5).unwrap();
+        let system_rent = av.get(6).unwrap();
+
+        // Verify merchant associated token
+        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
+        let derived_key = Pubkey::create_program_address(
+            &[
+                &token_owner.key.to_bytes(),
+                &spl_token.to_bytes(),
+                &token_mint.key.to_bytes(),
+                &[inp_nonce]
+            ],
+            &asc_token
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_key != *token_account.key {
+            msg!("Invalid token account");
+            return Err(ErrorCode::InvalidTokenAccount.into());
+        }
+
+        if spl_token != *token_program.key {
+            msg!("Invalid token program id");
+            return Err(ErrorCode::InvalidProgramId.into());
+        }
+
+        if asc_token != *ctx.accounts.asc_token_account.to_account_info().key {
+            msg!("Invalid associated token program id");
+            return Err(ErrorCode::InvalidProgramId.into());
+        }
+
+        // Fund associated token account
+        let instr = Instruction {
+            program_id: asc_token,
+            accounts: vec![
+                AccountMeta::new(*funding_account.key, true),
+                AccountMeta::new(*token_account.key, false),
+                AccountMeta::new_readonly(*token_owner.key, false),
+                AccountMeta::new_readonly(*token_mint.key, false),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(spl_token, false),
+                AccountMeta::new_readonly(sysvar::rent::id(), false),
+            ],
+            data: vec![],
+        };
+        invoke(
+            &instr,
+            &[
+                funding_account.clone(),
+                token_account.clone(),
+                token_owner.clone(),
+                token_mint.clone(),
+                system_program.clone(),
+                token_program.clone(),
+                system_rent.clone(),
+            ]
+        );
         Ok(())
     }
 
@@ -275,6 +394,7 @@ pub struct CreateSubscr<'info> {
     pub subscr_data: ProgramAccount<'info, SubscrData>,
     pub merchant_key: AccountInfo<'info>,
     pub merchant_approval: AccountInfo<'info>,
+    #[account(mut)]
     pub merchant_token: AccountInfo<'info>,
     pub manager_key: AccountInfo<'info>,
     //pub merchant_approval: ProgramAccount<'info, MerchantApproval>,
@@ -283,8 +403,12 @@ pub struct CreateSubscr<'info> {
     //pub abort_authority: ProgramAccount<'info, MerchantApproval>,
     #[account(signer)]
     pub user_key: AccountInfo<'info>,
+    pub user_agent: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
+    #[account(mut)]
     pub token_account: AccountInfo<'info>,
+    pub token_agent: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -294,11 +418,18 @@ pub struct ProcessSubscr<'info> {
     #[account(signer)]
     pub manager_key: AccountInfo<'info>,
     pub manager_approval: AccountInfo<'info>,
+    //pub token_agent: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct FundToken<'info> {
+    pub asc_token_account: AccountInfo<'info>,
 }
 
 #[account]
 pub struct SubscrData {
     pub user_key: Pubkey,               // The user that owns this subscription
+    pub user_agent: Pubkey,             // The program derived address for token delegation
     //pub approval_program: Pubkey,       // The address of the network authority program that signs approvals
     pub merchant_key: Pubkey,           // The merchant account that receives subscription payments
     pub merchant_approval: Pubkey,      // The merchant approval record from the network authority
@@ -348,6 +479,8 @@ pub enum ErrorCode {
     AccessDenied,
     #[msg("Invalid subscription period")]
     InactiveSubscription,
+    #[msg("Invalid program id")]
+    InvalidProgramId,
     #[msg("Invalid subscription period")]
     InvalidSubscriptionPeriod,
     #[msg("Invalid max delay")]
