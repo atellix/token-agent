@@ -55,26 +55,34 @@ async function main() {
     console.log('User Allowance')
     console.log(userAllowance, allowanceBytes, allowanceRent)
 
-    console.log('Create Allowance')
-    await tokenAgent.rpc.createAllowance(
-        true,                                       // Link token
-        userAgent.nonce,                            // User agent nonce
-        userAllowance.nonce,                        // Allowance nonce
-        new anchor.BN(allowanceBytes),              // Allowance size
-        new anchor.BN(allowanceRent),               // Allowance rent
-        new anchor.BN(1000 * 1000000),              // Amount
-        new anchor.BN(0),                           // Start time, or 0 for none
-        new anchor.BN(0),                           // Expire time, or 0 for none
-        {
-            accounts: {
-                userKey: provider.wallet.publicKey,
-                userAgent: new PublicKey(userAgent.pubkey),
-                tokenProgram: TOKEN_PROGRAM_ID,
-                tokenMint: tokenMint,
-                tokenAccount: tokenAccount,
-            },
-        }
-    )
+    if (false) {
+        console.log('Create Allowance')
+        await tokenAgent.rpc.createAllowance(
+            true,                                       // Link token
+            userAgent.nonce,                            // User agent nonce
+            userAllowance.nonce,                        // Allowance nonce
+            new anchor.BN(allowanceBytes),              // Allowance size
+            new anchor.BN(allowanceRent),               // Allowance rent
+            new anchor.BN(1000 * 1000000),              // Amount
+            new anchor.BN(0),                           // Start time, or 0 for none
+            new anchor.BN(0),                           // Expire time, or 0 for none
+            {
+                accounts: {
+                    userKey: provider.wallet.publicKey,
+                    userAgent: new PublicKey(userAgent.pubkey),
+                    delegateKey: managerPK.publicKey,
+                    tokenMint: tokenMint,
+                    tokenAccount: tokenAccount,
+                    tokenProgram: TOKEN_PROGRAM_ID,
+                },
+                remainingAccounts: [
+                    { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
+                    { pubkey: new PublicKey(userAllowance.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
+                ],
+            }
+        )
+    }
 
     console.log('Fund Token: Merchant')
     await tokenAgent.rpc.fundToken(
@@ -112,10 +120,12 @@ async function main() {
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
     var dts0 = dt0.toFormat("yyyyLL")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
+    const transactId = uuidv4()
     await tokenAgent.rpc.subscribe(
-        true,
-        new anchor.BN(1000 * 1000000),
-        programDA.nonce,
+        false,
+        new anchor.BN(1000 * 1000000),                  // initial_amount
+        new anchor.BN(uuidparse(transactId)),           // initial_tx_uuid
+        userAgent.nonce,
         merchantTK.nonce,
         new anchor.BN(uuidparse(subscrId)),             // inp_subscr_uuid
         2,                                              // inp_period (2 = monthly)
