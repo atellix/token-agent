@@ -45,6 +45,7 @@ mod token_agent {
     pub fn subscribe(ctx: Context<CreateSubscr>,
         link_token: bool,
         initial_amount: u64,
+        initial_tx_uuid: u128,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
         inp_subscr_uuid: u128,
@@ -116,7 +117,7 @@ mod token_agent {
             return Err(ErrorCode::InvalidTimeframe.into());
         }
 
-        // Verify user associated token
+        // Verify user's program derived account
         let derived_user_key = Pubkey::create_program_address(
             &[
                 &ctx.accounts.user_key.to_account_info().key.to_bytes(),
@@ -129,7 +130,7 @@ mod token_agent {
             return Err(ErrorCode::InvalidTokenAccount.into());
         }
 
-        // Verify merchant associated token
+        // Verify merchant's associated token
         let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
         let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
         let derived_merchant_key = Pubkey::create_program_address(
@@ -277,15 +278,19 @@ mod token_agent {
         Ok(())
     }
 
-/*    pub fn update_subscription() -> ProgramResult {
+/*    pub fn pause() -> ProgramResult {
         Ok(())
     }
 
-    pub fn update_subscription_manager() -> ProgramResult {
+    pub fn unpause() -> ProgramResult {
+        Ok(())
+    }
+
+    pub fn update_manager() -> ProgramResult {
         Ok(())
     } */
 
-    pub fn process_subscription(ctx: Context<ProcessSubscr>,
+    pub fn process(ctx: Context<ProcessSubscr>,
         inp_rebill_uuid: u128,
         inp_rebill_ts: i64,
         inp_rebill_str: String,
@@ -374,17 +379,79 @@ mod token_agent {
         Ok(())
     }
 
-/*    pub fn approve_allowance() -> ProgramResult {
-        Ok(())
-    }
+    pub fn set_allowance(ctx: Context<SetAllowance>,
+        link_token: bool,
+        inp_user_nonce: u8,
+        inp_amount: u64,
+        inp_not_valid_before: i64,
+        inp_not_valid_after: i64,
+    ) -> ProgramResult {
+        let clock = Clock::get()?;
+        let ts = clock.unix_timestamp;
 
-    pub fn revoke_allowance() -> ProgramResult {
+        // Validate input
+        if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
+            msg!("Invalid allowance start");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_after < 0 || (inp_not_valid_after > 0 && inp_not_valid_after < ts) {
+            msg!("Invalid allowance end");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_after != 0 && inp_not_valid_before != 0 {
+            if inp_not_valid_after <= inp_not_valid_before {
+                msg!("Invalid timeframe");
+                return Err(ErrorCode::InvalidTimeframe.into());
+            }
+        }
+
+        // Verify user's program derived account
+        let derived_user_key = Pubkey::create_program_address(
+            &[
+                &ctx.accounts.user_key.to_account_info().key.to_bytes(),
+                &[inp_user_nonce]
+            ],
+            ctx.program_id
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
+            msg!("Invalid merchant token account");
+            return Err(ErrorCode::InvalidTokenAccount.into());
+        }
+
+        // Setup up token delegate if needed
+        if link_token {
+            let cpi_accounts = Approve {
+                to: ctx.accounts.token_account.to_account_info(),
+                delegate: ctx.accounts.user_agent.to_account_info(),
+                authority: ctx.accounts.user_key.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+            token::approve(cpi_ctx, u64::MAX)?;
+        }
+
+        let tka = &mut ctx.accounts.allowance_data;
+        tka.user_key = *ctx.accounts.user_key.to_account_info().key;
+        tka.user_agent = *ctx.accounts.user_agent.to_account_info().key;
+        tka.delegate_key = *ctx.accounts.delegate_key.to_account_info().key;
+        tka.token_mint = *ctx.accounts.token_mint.to_account_info().key;
+        tka.token_account = *ctx.accounts.token_account.to_account_info().key;
+        tka.not_valid_before = inp_not_valid_before;
+        tka.not_valid_after = inp_not_valid_after;
+        tka.amount = inp_amount;
+        if ctx.remaining_accounts.len() > 0 {
+            let pk: Pubkey = ctx.remaining_accounts.get(0).unwrap().key;
+            tka.recipient_key = Some(pk);
+        } else {
+            tka.recipient_key = None;
+        }
+
         Ok(())
     }
 
     pub fn delegated_transfer() -> ProgramResult {
         Ok(())
-    } */
+    }
 }
 
 #[derive(Accounts)]
@@ -426,6 +493,18 @@ pub struct FundToken<'info> {
     pub asc_token_account: AccountInfo<'info>,
 }
 
+#[derive(Accounts)]
+pub struct SetAllowance<'info> {
+    #[account(init)]
+    pub allowance_data: ProgramAccount<'info, TokenAllowance>,
+    #[account(signer)]
+    pub user_key: AccountInfo<'info>,
+    pub user_agent: AccountInfo<'info>,
+    pub delegate_key: AccountInfo<'info>,
+    pub token_mint: AccountInfo<'info>,
+    pub token_account: AccountInfo<'info>,
+}
+
 #[account]
 pub struct SubscrData {
     pub user_key: Pubkey,               // The user that owns this subscription
@@ -464,6 +543,7 @@ pub struct SubscrData {
 pub struct TokenAllowance {
     //pub abort_authority: Pubkey,        // The abort authority from the network authority to abort in case of hacks
     pub user_key: Pubkey,               // The user that owns the tokens
+    pub user_agent: Pubkey,             // The program derived address for delegation of the SPL token
     pub delegate_key: Pubkey,           // The delegate granted an allowance of tokens to transfer
     pub recipient_key: Option<Pubkey>,  // Optional recipient key to limit where tokens can be transferred to
     pub token_mint: Pubkey,             // The token mint for the allowance
