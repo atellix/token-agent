@@ -43,6 +43,39 @@ async function main() {
     const managerPK = anchor.web3.Keypair.generate()
     const managerAP = anchor.web3.Keypair.generate()
 
+    const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
+    const userAllowance = await programAddress([
+        provider.wallet.publicKey.toBuffer(),
+        TOKEN_PROGRAM_ID.toBuffer(),
+        tokenMint.toBuffer(),
+        tokenAccount.toBuffer(),
+    ])
+    const allowanceBytes = tokenAgent.account.tokenAllowance.size
+    const allowanceRent = await provider.connection.getMinimumBalanceForRentExemption(allowanceBytes)
+    console.log('User Allowance')
+    console.log(userAllowance, allowanceBytes, allowanceRent)
+
+    console.log('Create Allowance')
+    await tokenAgent.rpc.createAllowance(
+        true,                                       // Link token
+        userAgent.nonce,                            // User agent nonce
+        userAllowance.nonce,                        // Allowance nonce
+        new anchor.BN(allowanceBytes),              // Allowance size
+        new anchor.BN(allowanceRent),               // Allowance rent
+        new anchor.BN(1000 * 1000000),              // Amount
+        new anchor.BN(0),                           // Start time, or 0 for none
+        new anchor.BN(0),                           // Expire time, or 0 for none
+        {
+            accounts: {
+                userKey: provider.wallet.publicKey,
+                userAgent: new PublicKey(userAgent.pubkey),
+                tokenProgram: TOKEN_PROGRAM_ID,
+                tokenMint: tokenMint,
+                tokenAccount: tokenAccount,
+            },
+        }
+    )
+
     console.log('Fund Token: Merchant')
     await tokenAgent.rpc.fundToken(
         merchantTK.nonce,
@@ -75,7 +108,6 @@ async function main() {
     await provider.send(tx, [subscrData])
 
     console.log('Subscribe')
-    const programDA = await programAddress([provider.wallet.publicKey.toBuffer()])
     var dt0 = DateTime.now().setZone('utc')
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
     var dts0 = dt0.toFormat("yyyyLL")
@@ -102,11 +134,11 @@ async function main() {
                 managerKey: managerPK.publicKey,
                 managerApproval: managerAP.publicKey,
                 userKey: provider.wallet.publicKey,
-                userAgent: new PublicKey(programDA.pubkey),
+                userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenMint: tokenMint,
-                tokenAccount: tokenAccount,
-                tokenAgent: tokenAgentPK
+                tokenAccount: tokenAccount
+//                tokenAgent: tokenAgentPK
             }
         }
     )

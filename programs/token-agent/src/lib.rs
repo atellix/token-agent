@@ -8,7 +8,7 @@ use anchor_spl::token::{ self, Transfer, Approve };
 use solana_program::{
     sysvar,
     instruction::{AccountMeta, Instruction},
-    program::{ invoke },
+    program::{ invoke, invoke_signed },
     account_info::AccountInfo,
     clock::Clock,
 };
@@ -60,10 +60,10 @@ mod token_agent {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
 
-        if *ctx.program_id != *ctx.accounts.token_agent.to_account_info().key {
+        /* if *ctx.program_id != *ctx.accounts.token_agent.to_account_info().key {
             msg!("Invalid program id");
             return Err(ErrorCode::InvalidProgramId.into());
-        }
+        } */
 
         // Verify input
         let period = SubscriptionPeriod::try_from_primitive(inp_period);
@@ -127,7 +127,7 @@ mod token_agent {
         ).map_err(|_| ErrorCode::InvalidNonce)?;
         if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
             msg!("Invalid merchant token account");
-            return Err(ErrorCode::InvalidTokenAccount.into());
+            return Err(ErrorCode::InvalidDerivedAccount.into());
         }
 
         // Verify merchant's associated token
@@ -144,7 +144,7 @@ mod token_agent {
         ).map_err(|_| ErrorCode::InvalidNonce)?;
         if derived_merchant_key != *ctx.accounts.merchant_token.to_account_info().key {
             msg!("Invalid merchant token account");
-            return Err(ErrorCode::InvalidTokenAccount.into());
+            return Err(ErrorCode::InvalidDerivedAccount.into());
         }
 
         if spl_token != *ctx.accounts.token_program.to_account_info().key {
@@ -236,7 +236,7 @@ mod token_agent {
         ).map_err(|_| ErrorCode::InvalidNonce)?;
         if derived_key != *token_account.key {
             msg!("Invalid token account");
-            return Err(ErrorCode::InvalidTokenAccount.into());
+            return Err(ErrorCode::InvalidDerivedAccount.into());
         }
 
         if spl_token != *token_program.key {
@@ -379,9 +379,12 @@ mod token_agent {
         Ok(())
     }
 
-    pub fn set_allowance(ctx: Context<SetAllowance>,
+    pub fn create_allowance(ctx: Context<CreateAllowance>,
         link_token: bool,
         inp_user_nonce: u8,
+        inp_allowance_nonce: u8,
+        inp_data_size: u64,
+        inp_data_rent: u64,
         inp_amount: u64,
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
@@ -405,6 +408,23 @@ mod token_agent {
             }
         }
 
+        // Verfiy allowance program derived address
+        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let derived_allowance_key = Pubkey::create_program_address(
+            &[
+                &ctx.accounts.user_key.to_account_info().key.to_bytes(),
+                &spl_token.to_bytes(),
+                &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                &ctx.accounts.token_account.to_account_info().key.to_bytes(),
+                &[inp_allowance_nonce]
+            ],
+            ctx.program_id
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_allowance_key != *ctx.accounts.allowance_data.to_account_info().key {
+            msg!("Invalid allowance account");
+            return Err(ErrorCode::InvalidDerivedAccount.into());
+        }
+
         // Verify user's program derived account
         let derived_user_key = Pubkey::create_program_address(
             &[
@@ -414,9 +434,30 @@ mod token_agent {
             ctx.program_id
         ).map_err(|_| ErrorCode::InvalidNonce)?;
         if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
-            msg!("Invalid merchant token account");
-            return Err(ErrorCode::InvalidTokenAccount.into());
+            msg!("Invalid allowance account");
+            return Err(ErrorCode::InvalidDerivedAccount.into());
         }
+
+        let account_signer_seeds: &[&[_]] = &[
+            ctx.program_id.as_ref(),
+            &[bump_seed],
+        ];
+        msg!("Create allowance account");
+        invoke_signed(
+            &system_instruction::create_account(
+                funder_info.key,
+                data_account_info.key,
+                inp_data_rent,
+                inp_data_size,
+                ctx.program_id
+            ),
+            &[
+                funder_info.clone(),
+                data_account_info.clone(),
+                system_program_info.clone(),
+            ],
+            &[account_signer_seeds],
+        )?;
 
         // Setup up token delegate if needed
         if link_token {
@@ -475,7 +516,7 @@ pub struct CreateSubscr<'info> {
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
     pub token_account: AccountInfo<'info>,
-    pub token_agent: AccountInfo<'info>,
+    //pub token_agent: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -494,15 +535,18 @@ pub struct FundToken<'info> {
 }
 
 #[derive(Accounts)]
-pub struct SetAllowance<'info> {
+pub struct CreateAllowance<'info> {
     #[account(init)]
     pub allowance_data: ProgramAccount<'info, TokenAllowance>,
+    #[account(signer)]
+    pub funder_key: AccountInfo<'info>,
     #[account(signer)]
     pub user_key: AccountInfo<'info>,
     pub user_agent: AccountInfo<'info>,
     pub delegate_key: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
     pub token_account: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
 }
 
 #[account]
@@ -565,8 +609,8 @@ pub enum ErrorCode {
     InvalidSubscriptionPeriod,
     #[msg("Invalid max delay")]
     InvalidMaxDelay,
-    #[msg("Invalid token account")]
-    InvalidTokenAccount,
+    #[msg("Invalid derived account")]
+    InvalidDerivedAccount,
     #[msg("Invalid timeframe")]
     InvalidTimeframe,
     #[msg("Invalid data type")]
