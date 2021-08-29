@@ -55,7 +55,26 @@ async function main() {
     console.log('User Allowance')
     console.log(userAllowance, allowanceBytes, allowanceRent)
 
-    if (false) {
+    console.log('Fund Token: Merchant')
+    await tokenAgent.rpc.fundToken(
+        merchantTK.nonce,
+        {
+            accounts: {
+                ascTokenAccount: SPL_ASSOCIATED_TOKEN,
+            },
+            remainingAccounts: [
+                { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
+                { pubkey: tokenMint, isWritable: false, isSigner: false },
+                { pubkey: merchantPK.publicKey, isWritable: false, isSigner: false },
+                { pubkey: new PublicKey(merchantTK.pubkey), isWritable: true, isSigner: false },
+                { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
+                { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
+                { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
+            ]
+        }
+    )
+
+    if (true) {
         console.log('Create Allowance')
         await tokenAgent.rpc.createAllowance(
             true,                                       // Link token
@@ -83,25 +102,48 @@ async function main() {
             }
         )
     }
-
-    console.log('Fund Token: Merchant')
-    await tokenAgent.rpc.fundToken(
-        merchantTK.nonce,
-        {
-            accounts: {
-                ascTokenAccount: SPL_ASSOCIATED_TOKEN,
-            },
-            remainingAccounts: [
-                { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
-                { pubkey: tokenMint, isWritable: false, isSigner: false },
-                { pubkey: merchantPK.publicKey, isWritable: false, isSigner: false },
-                { pubkey: new PublicKey(merchantTK.pubkey), isWritable: true, isSigner: false },
-                { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
-                { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
-                { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
-            ]
-        }
-    )
+    if (true) {
+        console.log('Perform Delegated Transfer')
+        await tokenAgent.rpc.delegatedTransfer(
+            userAgent.nonce,                            // User agent nonce
+            userAllowance.nonce,                        // Allowance nonce
+            new anchor.BN(500 * 1000000),               // Amount
+            {
+                signers: [managerPK],
+                accounts: {
+                    allowanceData: new PublicKey(userAllowance.pubkey),
+                    userKey: provider.wallet.publicKey,
+                    userAgent: new PublicKey(userAgent.pubkey),
+                    userToken: tokenAccount,                            // From
+                    tokenRecipient: new PublicKey(merchantTK.pubkey),   // To
+                    delegateKey: managerPK.publicKey,
+                    tokenMint: tokenMint,
+                    tokenProgram: TOKEN_PROGRAM_ID,
+                },
+            }
+        )
+    }
+    if (true) {
+        console.log('Perform Delegated Transfer 2')
+        await tokenAgent.rpc.delegatedTransfer(
+            userAgent.nonce,                            // User agent nonce
+            userAllowance.nonce,                        // Allowance nonce
+            new anchor.BN(501 * 1000000),               // Amount
+            {
+                signers: [managerPK],
+                accounts: {
+                    allowanceData: new PublicKey(userAllowance.pubkey),
+                    userKey: provider.wallet.publicKey,
+                    userAgent: new PublicKey(userAgent.pubkey),
+                    userToken: tokenAccount,                            // From
+                    tokenRecipient: new PublicKey(merchantTK.pubkey),   // To
+                    delegateKey: managerPK.publicKey,
+                    tokenMint: tokenMint,
+                    tokenProgram: TOKEN_PROGRAM_ID,
+                },
+            }
+        )
+    }
 
     const tx = new anchor.web3.Transaction()
     tx.add(
@@ -122,7 +164,7 @@ async function main() {
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
     const transactId = uuidv4()
     await tokenAgent.rpc.subscribe(
-        false,
+        true,
         new anchor.BN(1000 * 1000000),                  // initial_amount
         new anchor.BN(uuidparse(transactId)),           // initial_tx_uuid
         userAgent.nonce,
