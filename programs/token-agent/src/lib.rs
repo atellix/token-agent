@@ -329,7 +329,7 @@ mod token_agent {
         }
         if subscr.not_valid_after > 0 && ts > subscr.not_valid_after {
             msg!("Subscription expired");
-            return Err(ErrorCode::SubscriptionExpired.into());
+            return Err(ErrorCode::Expired.into());
         }
         if inp_rebill_ts < 0 {
             msg!("Invalid negative rebill timestamp");
@@ -346,7 +346,7 @@ mod token_agent {
         let timeframe_end = inp_rebill_ts.checked_add(subscr.max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
         if ts > timeframe_end {
             msg!("Rebill expired");
-            return Err(ErrorCode::RebillExpired.into());
+            return Err(ErrorCode::Expired.into());
         }
         let d1 = get_period_string(inp_rebill_ts, period.unwrap())?;
         if inp_rebill_str != d1 {   
@@ -659,7 +659,20 @@ mod token_agent {
             return Err(ErrorCode::InvalidAccount.into());
         }
         // TODO: check recipient_key option
-        // TODO: timeframe
+
+        // Validate timeframe
+        if ald.not_valid_before > 0 || ald.not_valid_after > 0 {
+            let clock = Clock::get()?;
+            let ts = clock.unix_timestamp;
+            if ald.not_valid_before > 0 && ts < ald.not_valid_before {
+                msg!("Allowance not valid yet");
+                return Err(ErrorCode::NotValidYet.into());
+            }
+            if ald.not_valid_after > 0 && ts > ald.not_valid_after {
+                msg!("Allowance expired");
+                return Err(ErrorCode::Expired.into());
+            }
+        }
 
         if inp_amount > 0 {
             msg!("Transfer amount: {}", inp_amount.to_string());
@@ -820,8 +833,6 @@ pub struct TokenAllowance {
 
 #[error]
 pub enum ErrorCode {
-    #[msg("Access denied")]
-    AccessDenied,
     #[msg("Invalid subscription period")]
     InactiveSubscription,
     #[msg("Invalid program id")]
@@ -844,10 +855,8 @@ pub enum ErrorCode {
     AllowanceExceeded,
     #[msg("Subscription not valid yet")]
     NotValidYet,
-    #[msg("Subscription expired")]
-    SubscriptionExpired,
-    #[msg("Rebill expired")]
-    RebillExpired,
+    #[msg("Expired")]
+    Expired,
     #[msg("Maximum rebills reached")]
     DuplicateRebill,
     #[msg("Duplicate rebill")]

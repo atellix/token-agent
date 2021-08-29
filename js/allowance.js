@@ -45,7 +45,7 @@ async function main() {
     if (false) {
         managerPK = anchor.web3.Keypair.generate()
     } else {
-        managerPK = anchor.web3.Keypair.fromSecretKey(new Uint8Array([204,117,254,251,143,74,206,12,44,141,166,201,21,57,251,115,214,10,190,243,90,126,236,26,247,107,50,175,114,250,92,111,154,112,223,8,41,199,7,17,107,220,24,44,29,224,209,79,138,247,161,91,140,35,228,107,95,21,143,2,51,247,238,221]))
+        managerPK = anchor.web3.Keypair.fromSecretKey(new Uint8Array([119,207,69,14,225,84,57,222,85,25,143,51,99,176,218,91,113,19,12,59,193,78,243,206,184,85,38,75,183,145,39,62,146,87,67,118,8,41,7,116,10,101,211,14,240,90,17,102,73,222,131,47,70,195,116,127,49,161,11,49,40,205,2,34]))
     }
     //const managerAP = anchor.web3.Keypair.generate()
 
@@ -139,7 +139,7 @@ async function main() {
     if (true) {
         console.log('Update Allowance')
         await tokenAgent.rpc.updateAllowance(
-            false,                                      // Link token
+            true,                                       // Link token
             userAgent.nonce,                            // User agent nonce
             userAllowance.nonce,                        // Allowance nonce
             new anchor.BN(1000 * 1000000),              // Amount
@@ -163,7 +163,7 @@ async function main() {
         await tokenAgent.rpc.delegatedTransfer(
             userAgent.nonce,                            // User agent nonce
             userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(501 * 1000000),               // Amount
+            new anchor.BN(500 * 1000000),               // Amount
             {
                 signers: [managerPK],
                 accounts: {
