@@ -1,8 +1,10 @@
 const { Buffer } = require('buffer')
 const { DateTime } = require("luxon")
 const { v4: uuidv4, parse: uuidparse } = require('uuid')
-const { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } = require('@solana/web3.js')
+const { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } = require('@solana/web3.js')
 const { TOKEN_PROGRAM_ID } = require('@solana/spl-token')
+const fs = require('fs').promises
+const base32 = require("base32.js")
 
 const anchor = require('@project-serum/anchor')
 //const provider = anchor.Provider.env()
@@ -28,123 +30,87 @@ async function programAddress(inputs) {
     return res
 }
 
+function importSecretKey(keyStr) {
+    var dec = new base32.Decoder({ type: "crockford" })
+    var spec = dec.write(keyStr).finalize()
+    return Keypair.fromSecretKey(new Uint8Array(spec))
+}
+
 async function main() {
-    const tokenMint = new PublicKey('7KCJVP436UCWf4qT4Nc6ora62ZqsYtadyft47QLmFUHL')
-    const tokenAccount = new PublicKey('44EkCqNcJJZA7h5aaPDTnmj1cuLgigdxUbXdhpBX58nk')
+    var ndjs
+    try {
+        ndjs = await fs.readFile('/Users/mfrager/Build/solana/net-authority/js/net.json')
+    } catch (error) {
+        console.error('File Error: ', error)
+    }
+    const netData = JSON.parse(ndjs.toString())
+    //console.log(netData)
+    const netAuth = new PublicKey(netData.netAuthorityProgram)
+    const tokenMint = new PublicKey(netData.tokenMintUSDV)
+    const walletToken = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
+    const tokenAccount = new PublicKey(walletToken.pubkey)
 
     const subscrId = uuidv4()
     const subscrData = anchor.web3.Keypair.generate()
     const subscrDataBytes = tokenAgent.account.subscrData.size
     const subscrDataRent = await provider.connection.getMinimumBalanceForRentExemption(subscrDataBytes)
     console.log('Subscr Data Rent: ' + subscrDataRent)
-    const merchantPK = anchor.web3.Keypair.generate()
-    const merchantAP = anchor.web3.Keypair.generate()
-    const merchantTK = await associatedTokenAddress(merchantPK.publicKey, tokenMint)
-    const managerPK = anchor.web3.Keypair.generate()
-    const managerAP = anchor.web3.Keypair.generate()
+    //const merchantPK = anchor.web3.Keypair.generate()
+    //const merchantAP = anchor.web3.Keypair.generate()
+    const merchantPK = new PublicKey(netData.merchant1)
+    const merchantAP = new PublicKey(netData.merchantApproval1)
+    const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
+    //const managerPK = anchor.web3.Keypair.generate()
+    //const managerAP = anchor.web3.Keypair.generate()
+    const managerPK = new PublicKey(netData.manager1)
+    const managerSK = importSecretKey(netData.manager1_secret)
+    const managerAP = new PublicKey(netData.managerApproval1)
+    const feesPK = new PublicKey(netData.fees1)
+    const feesTK = await associatedTokenAddress(feesPK, tokenMint)
 
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
-    const userAllowance = await programAddress([
-        provider.wallet.publicKey.toBuffer(),
-        TOKEN_PROGRAM_ID.toBuffer(),
-        tokenMint.toBuffer(),
-        tokenAccount.toBuffer(),
-    ])
-    const allowanceBytes = tokenAgent.account.tokenAllowance.size
-    const allowanceRent = await provider.connection.getMinimumBalanceForRentExemption(allowanceBytes)
-    console.log('User Allowance')
-    console.log(userAllowance, allowanceBytes, allowanceRent)
 
-    console.log('Fund Token: Merchant')
-    await tokenAgent.rpc.fundToken(
-        merchantTK.nonce,
-        {
-            accounts: {
-                ascTokenAccount: SPL_ASSOCIATED_TOKEN,
-            },
-            remainingAccounts: [
-                { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
-                { pubkey: tokenMint, isWritable: false, isSigner: false },
-                { pubkey: merchantPK.publicKey, isWritable: false, isSigner: false },
-                { pubkey: new PublicKey(merchantTK.pubkey), isWritable: true, isSigner: false },
-                { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
-                { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
-                { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
-            ]
-        }
-    )
-
-    if (true) {
-        console.log('Create Allowance')
-        await tokenAgent.rpc.createAllowance(
-            true,                                       // Link token
-            userAgent.nonce,                            // User agent nonce
-            userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(allowanceBytes),              // Allowance size
-            new anchor.BN(allowanceRent),               // Allowance rent
-            new anchor.BN(1000 * 1000000),              // Amount
-            new anchor.BN(0),                           // Start time, or 0 for none
-            new anchor.BN(0),                           // Expire time, or 0 for none
+    if (false) {
+        console.log('Fund Token: Merchant')
+        await tokenAgent.rpc.fundToken(
+            merchantTK.nonce,
             {
                 accounts: {
-                    userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
-                    delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
-                    tokenAccount: tokenAccount,
-                    tokenProgram: TOKEN_PROGRAM_ID,
+                    ascTokenAccount: SPL_ASSOCIATED_TOKEN,
                 },
                 remainingAccounts: [
                     { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
-                    { pubkey: new PublicKey(userAllowance.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: tokenMint, isWritable: false, isSigner: false },
+                    { pubkey: merchantPK, isWritable: false, isSigner: false },
+                    { pubkey: new PublicKey(merchantTK.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
                     { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
-                ],
+                    { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
+                ]
             }
         )
-    }
-    if (true) {
-        console.log('Perform Delegated Transfer')
-        await tokenAgent.rpc.delegatedTransfer(
-            userAgent.nonce,                            // User agent nonce
-            userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(500 * 1000000),               // Amount
+
+        console.log('Fund Token: Fees')
+        await tokenAgent.rpc.fundToken(
+            feesTK.nonce,
             {
-                signers: [managerPK],
                 accounts: {
-                    allowanceData: new PublicKey(userAllowance.pubkey),
-                    userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
-                    userToken: tokenAccount,                            // From
-                    tokenRecipient: new PublicKey(merchantTK.pubkey),   // To
-                    delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
-                    tokenProgram: TOKEN_PROGRAM_ID,
+                    ascTokenAccount: SPL_ASSOCIATED_TOKEN,
                 },
-            }
-        )
-    }
-    if (true) {
-        console.log('Perform Delegated Transfer 2')
-        await tokenAgent.rpc.delegatedTransfer(
-            userAgent.nonce,                            // User agent nonce
-            userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(501 * 1000000),               // Amount
-            {
-                signers: [managerPK],
-                accounts: {
-                    allowanceData: new PublicKey(userAllowance.pubkey),
-                    userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
-                    userToken: tokenAccount,                            // From
-                    tokenRecipient: new PublicKey(merchantTK.pubkey),   // To
-                    delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
-                    tokenProgram: TOKEN_PROGRAM_ID,
-                },
+                remainingAccounts: [
+                    { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
+                    { pubkey: tokenMint, isWritable: false, isSigner: false },
+                    { pubkey: feesPK, isWritable: false, isSigner: false },
+                    { pubkey: new PublicKey(feesTK.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
+                    { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
+                    { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
+                ]
             }
         )
     }
 
+    console.log('Fund Account: Subscription 1')
     const tx = new anchor.web3.Transaction()
     tx.add(
         anchor.web3.SystemProgram.createAccount({
@@ -165,10 +131,10 @@ async function main() {
     const transactId = uuidv4()
     await tokenAgent.rpc.subscribe(
         true,
-        new anchor.BN(1000 * 1000000),                  // initial_amount
+        new anchor.BN(100000),                          // initial_amount
         new anchor.BN(uuidparse(transactId)),           // initial_tx_uuid
-        userAgent.nonce,
-        merchantTK.nonce,
+        userAgent.nonce,                                // inp_user_nonce
+        merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         new anchor.BN(uuidparse(subscrId)),             // inp_subscr_uuid
         2,                                              // inp_period (2 = monthly)
         new anchor.BN(10000),                           // inp_budget
@@ -180,44 +146,55 @@ async function main() {
         {
             accounts: {
                 subscrData: subscrData.publicKey,
-                merchantKey: merchantPK.publicKey,
-                merchantApproval: merchantAP.publicKey,
+                netAuth: netAuth,
+                merchantKey: merchantPK,
+                merchantApproval: merchantAP,
                 merchantToken: new PublicKey(merchantTK.pubkey),
-                managerKey: managerPK.publicKey,
-                managerApproval: managerAP.publicKey,
+                managerKey: managerPK,
+                managerApproval: managerAP,
                 userKey: provider.wallet.publicKey,
                 userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenMint: tokenMint,
-                tokenAccount: tokenAccount
-//                tokenAgent: tokenAgentPK
+                tokenAccount: tokenAccount,
+                feesAccount: new PublicKey(feesTK.pubkey),
             }
         }
     )
 
-    if (false) {
+    if (true) {
         console.log('Process 1')
         var eventId = uuidv4()
         var dt1 = dt0.plus({ months: 1 })
         var dts1 = dt1.toFormat("yyyyLL")
         console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO())
-        const tx3 = await tokenAgent.transaction.processSubscription(
-            new anchor.BN(uuidparse(eventId)),              // inp_event_uuid
+        const tx3 = await tokenAgent.transaction.process(
+            userAgent.nonce,                                // inp_user_nonce
+            merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
+            new anchor.BN(uuidparse(eventId)),              // inp_rebill_uuid
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
-            new anchor.BN(5000),                            // inp_amount
+            new anchor.BN(10000),                            // inp_amount
             {
                 accounts: {
                     subscrData: subscrData.publicKey,
-                    managerKey: managerPK.publicKey,
-                    managerApproval: managerAP.publicKey
+                    merchantKey: merchantPK,
+                    merchantApproval: merchantAP,
+                    merchantToken: new PublicKey(merchantTK.pubkey),
+                    managerKey: managerPK,
+                    managerApproval: managerAP,
+                    userAgent: new PublicKey(userAgent.pubkey),
+                    tokenProgram: TOKEN_PROGRAM_ID,
+                    tokenMint: tokenMint,
+                    tokenAccount: tokenAccount,
+                    feesAccount: new PublicKey(feesTK.pubkey),
                 }
             }
         )
-        await provider.send(tx3, [managerPK])
+        await provider.send(tx3, [managerSK])
 
-        console.log('Process 2')
+        /* console.log('Process 2')
         eventId = uuidv4()
         dt2 = dt1.plus({ months: 1 })
         dts2 = dt2.toFormat("yyyyLL")
@@ -236,7 +213,7 @@ async function main() {
                 }
             }
         )
-        await provider.send(tx4, [managerPK])
+        await provider.send(tx4, [managerPK]) */
     }
 }
 

@@ -11,6 +11,7 @@
   "dependencies": {
     "@project-serum/anchor": "^0.13.2",
     "@solana/spl-token": "^0.1.8",
+    "base32.js": "^0.1.0",
     "luxon": "^2.0.2",
     "moment-strftime": "^0.5.0",
     "uuid": "^8.3.2"

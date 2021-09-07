@@ -38,6 +38,18 @@ pub fn get_period_string(ts: i64, period: SubscriptionPeriod) -> FnResult<String
     }
 }
 
+fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<String>) -> ProgramResult {
+    if *left != *right {
+        if error_msg.is_some() {
+            msg!(error_msg.unwrap().as_str());
+            msg!("Expected: {}", left.to_string());
+            msg!("Received: {}", right.to_string());
+        }
+        return Err(ErrorCode::InvalidAccount.into());
+    }
+    Ok(())
+}
+
 #[program]
 mod token_agent {
     use super::*;
@@ -59,6 +71,41 @@ mod token_agent {
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
+
+        // Verify network authority accounts
+        let netauth = &ctx.accounts.net_auth.to_account_info().key;
+        let acc_mrch_approve = &ctx.accounts.merchant_approval.to_account_info();
+        let acc_mgr_approve = &ctx.accounts.manager_approval.to_account_info();
+        verify_matching_accounts(netauth, &acc_mrch_approve.owner,
+            Some(String::from("Invalid merchant approval owner"))
+        )?;
+        verify_matching_accounts(netauth, &acc_mgr_approve.owner,
+            Some(String::from("Invalid manager approval owner"))
+        )?;
+        let mut mrch_approval_data: &[u8] = &acc_mrch_approve.try_borrow_data()?;
+        let mrch_approval = MerchantApproval::try_deserialize(&mut mrch_approval_data)?;
+        if !mrch_approval.active {
+            msg!("Inactive merchant approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mrch_approval.merchant_key, &ctx.accounts.merchant_key.to_account_info().key,
+            Some(String::from("Merchant key does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.token_mint, &ctx.accounts.token_mint.to_account_info().key,
+            Some(String::from("Token mint does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
+            Some(String::from("Fees account does not match approval"))
+        )?;
+        let mut mgr_approval_data: &[u8] = &acc_mgr_approve.try_borrow_data()?;
+        let mgr_approval = ManagerApproval::try_deserialize(&mut mgr_approval_data)?;
+        if !mgr_approval.active {
+            msg!("Inactive manager approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mgr_approval.manager_key, &ctx.accounts.manager_key.to_account_info().key,
+            Some(String::from("Manager key does not match approval"))
+        )?;
 
         // Verify input
         let period = SubscriptionPeriod::try_from_primitive(inp_period);
@@ -166,6 +213,26 @@ mod token_agent {
                 &[inp_user_nonce],
             ];
             let signer = &[&seeds[..]];
+
+            // Calculate fees
+            let mut amount: u64 = initial_amount;
+            if mrch_approval.fees_bps > 0 {
+                let f1: u128 = (amount as u128) << 64;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let fees: u64 = (f3 >> 64) as u64;
+                if fees > 0 {
+                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    let cpi_accounts = Transfer {
+                        from: ctx.accounts.token_account.to_account_info(),
+                        to: ctx.accounts.fees_account.to_account_info(),
+                        authority: ctx.accounts.user_agent.to_account_info(),
+                    };
+                    let cpi_program = ctx.accounts.token_program.clone();
+                    let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+                    token::transfer(cpi_ctx, fees)?;
+                }
+            }
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
                 to: ctx.accounts.merchant_token.to_account_info(),
@@ -173,16 +240,17 @@ mod token_agent {
             };
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-            token::transfer(cpi_ctx, initial_amount)?;
+            token::transfer(cpi_ctx, amount)?;
         }
 
         // Create subscription data
         let subscr = &mut ctx.accounts.subscr_data;
-        // TODO: network authority approvals
         subscr.user_key = *ctx.accounts.user_key.to_account_info().key;
         subscr.user_agent = *ctx.accounts.user_agent.to_account_info().key;
+        subscr.approval_program = *ctx.accounts.net_auth.to_account_info().key;
         subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
         subscr.merchant_token = *ctx.accounts.merchant_token.to_account_info().key;
+        subscr.merchant_approval = *ctx.accounts.merchant_approval.to_account_info().key;
         subscr.manager_key = *ctx.accounts.manager_key.to_account_info().key;
         subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
         subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
@@ -214,7 +282,7 @@ mod token_agent {
         let token_owner = av.get(2).unwrap();
         let token_account = av.get(3).unwrap();
         let token_program = av.get(4).unwrap();
-        let system_program = av.get(5).unwrap();
+        let sys_program = av.get(5).unwrap();
         let system_rent = av.get(6).unwrap();
 
         // Verify merchant associated token
@@ -265,7 +333,7 @@ mod token_agent {
                 token_account.clone(),
                 token_owner.clone(),
                 token_mint.clone(),
-                system_program.clone(),
+                sys_program.clone(),
                 token_program.clone(),
                 system_rent.clone(),
             ]
@@ -273,19 +341,13 @@ mod token_agent {
         Ok(())
     }
 
-/*    pub fn pause() -> ProgramResult {
-        Ok(())
-    }
-
-    pub fn unpause() -> ProgramResult {
-        Ok(())
-    }
-
-    pub fn update_manager() -> ProgramResult {
+/*    pub fn update_manager() -> ProgramResult {
         Ok(())
     } */
 
     pub fn process(ctx: Context<ProcessSubscr>,
+        inp_user_nonce: u8,
+        inp_merchant_nonce: u8,
         inp_rebill_uuid: u128,
         inp_rebill_ts: i64,
         inp_rebill_str: String,
@@ -294,10 +356,8 @@ mod token_agent {
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
-        msg!("Clock Timestamp: {}", ts.to_string());
 
         // Validate accounts
-        // TODO: Ensure account owner programs
         let subscr = &mut ctx.accounts.subscr_data;
         if subscr.manager_key != *ctx.accounts.manager_key.to_account_info().key {
             msg!("Invalid account: manager_key does not match subscription");
@@ -317,6 +377,78 @@ mod token_agent {
             return Err(ErrorCode::MaxRebills.into());
         }
 
+        // Verify user's program derived account
+        let derived_user_key = Pubkey::create_program_address(
+            &[
+                &subscr.user_key.to_bytes(),
+                &[inp_user_nonce]
+            ],
+            ctx.program_id
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
+            msg!("Invalid merchant token account");
+            return Err(ErrorCode::InvalidDerivedAccount.into());
+        }
+
+        // Verfiy token account and mint
+        verify_matching_accounts(&subscr.token_account, &ctx.accounts.token_account.to_account_info().key,
+            Some(String::from("Token account does not match subscription"))
+        )?;
+        verify_matching_accounts(&subscr.token_mint, &ctx.accounts.token_mint.to_account_info().key,
+            Some(String::from("Token mint does not match subscription"))
+        )?;
+
+        // Verify merchant's associated token
+        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
+        let derived_merchant_key = Pubkey::create_program_address(
+            &[
+                &ctx.accounts.merchant_key.to_account_info().key.to_bytes(),
+                &spl_token.to_bytes(),
+                &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                &[inp_merchant_nonce]
+            ],
+            &asc_token
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_merchant_key != *ctx.accounts.merchant_token.to_account_info().key {
+            msg!("Invalid merchant token account");
+            return Err(ErrorCode::InvalidDerivedAccount.into());
+        }
+
+        // Verify network authority accounts
+        let acc_mrch_approve = &ctx.accounts.merchant_approval.to_account_info();
+        let acc_mgr_approve = &ctx.accounts.manager_approval.to_account_info();
+        verify_matching_accounts(&subscr.approval_program, &acc_mrch_approve.owner,
+            Some(String::from("Invalid merchant approval owner"))
+        )?;
+        verify_matching_accounts(&subscr.approval_program, &acc_mgr_approve.owner,
+            Some(String::from("Invalid manager approval owner"))
+        )?;
+        let mut mrch_approval_data: &[u8] = &acc_mrch_approve.try_borrow_data()?;
+        let mrch_approval = MerchantApproval::try_deserialize(&mut mrch_approval_data)?;
+        if !mrch_approval.active {
+            msg!("Inactive merchant approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mrch_approval.merchant_key, &ctx.accounts.merchant_key.to_account_info().key,
+            Some(String::from("Merchant key does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.token_mint, &ctx.accounts.token_mint.to_account_info().key,
+            Some(String::from("Token mint does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
+            Some(String::from("Fees account does not match approval"))
+        )?;
+        let mut mgr_approval_data: &[u8] = &acc_mgr_approve.try_borrow_data()?;
+        let mgr_approval = ManagerApproval::try_deserialize(&mut mgr_approval_data)?;
+        if !mgr_approval.active {
+            msg!("Inactive manager approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mgr_approval.manager_key, &ctx.accounts.manager_key.to_account_info().key,
+            Some(String::from("Manager key does not match approval"))
+        )?;
+
         // Validate timeframe
         let period = SubscriptionPeriod::try_from_primitive(subscr.period);
         if period.is_err() {
@@ -335,7 +467,7 @@ mod token_agent {
             msg!("Invalid negative rebill timestamp");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
-        if ts < inp_rebill_ts && false { // <=== TESTING ONLY !!! REMOVE BEFORE LAUNCH !!!{
+        if ts < inp_rebill_ts && false { // <=== TESTING ONLY !!! REMOVE BEFORE LAUNCH !!!
             msg!("Invalid rebill timestamp after current time");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
@@ -364,8 +496,49 @@ mod token_agent {
             msg!("Next rebill out of sequence");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
+        if inp_amount > subscr.budget {
+            msg!("Amount exceeds budget");
+            return Err(ErrorCode::BudgetExceeded.into());
+        }
 
-        msg!("Rebill ready!");
+        msg!("Process rebill");
+
+        if inp_amount > 0 {
+            let seeds = &[
+                subscr.user_key.as_ref(),
+                &[inp_user_nonce],
+            ];
+            let signer = &[&seeds[..]];
+
+            // Calculate fees
+            let mut amount: u64 = inp_amount;
+            if mrch_approval.fees_bps > 0 {
+                let f1: u128 = (amount as u128) << 64;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let fees: u64 = (f3 >> 64) as u64;
+                if fees > 0 {
+                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    let cpi_accounts = Transfer {
+                        from: ctx.accounts.token_account.to_account_info(),
+                        to: ctx.accounts.fees_account.to_account_info(),
+                        authority: ctx.accounts.user_agent.to_account_info(),
+                    };
+                    let cpi_program = ctx.accounts.token_program.clone();
+                    let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+                    token::transfer(cpi_ctx, fees)?;
+                }
+                msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
+            }
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.token_account.to_account_info(),
+                to: ctx.accounts.merchant_token.to_account_info(),
+                authority: ctx.accounts.user_agent.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+            token::transfer(cpi_ctx, amount)?;
+        }
 
         // Update parameters
         subscr.next_rebill = inp_next_rebill;
@@ -407,7 +580,7 @@ mod token_agent {
         let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
         let funder_key = ctx.remaining_accounts.get(0).unwrap();
         let allowance_data = ctx.remaining_accounts.get(1).unwrap();
-        let system_program = ctx.remaining_accounts.get(2).unwrap();
+        let sys_program = ctx.remaining_accounts.get(2).unwrap();
         let derived_allowance_key = Pubkey::create_program_address(
             &[
                 &ctx.accounts.user_key.to_account_info().key.to_bytes(),
@@ -457,7 +630,7 @@ mod token_agent {
             &[
                 funder_key.clone(),
                 allowance_data.clone(),
-                system_program.clone(),
+                sys_program.clone(),
             ],
             &[account_signer_seeds],
         )?;
@@ -706,18 +879,16 @@ mod token_agent {
 
 #[derive(Accounts)]
 pub struct CreateSubscr<'info> {
-    //pub approval_program: AccountInfo<'info>,
-    #[account(init)]
+    #[account(mut)]
     pub subscr_data: ProgramAccount<'info, SubscrData>,
+    pub net_auth: AccountInfo<'info>,
     pub merchant_key: AccountInfo<'info>,
+    #[account(mut)]
     pub merchant_approval: AccountInfo<'info>,
     #[account(mut)]
     pub merchant_token: AccountInfo<'info>,
     pub manager_key: AccountInfo<'info>,
-    //pub merchant_approval: ProgramAccount<'info, MerchantApproval>,
     pub manager_approval: AccountInfo<'info>,
-    //pub manager_approval: ProgramAccount<'info, ManagerApproval>,
-    //pub abort_authority: ProgramAccount<'info, MerchantApproval>,
     #[account(signer)]
     pub user_key: AccountInfo<'info>,
     pub user_agent: AccountInfo<'info>,
@@ -725,15 +896,29 @@ pub struct CreateSubscr<'info> {
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
     pub token_account: AccountInfo<'info>,
+    #[account(mut)]
+    pub fees_account: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
 pub struct ProcessSubscr<'info> {
     #[account(mut)]
     pub subscr_data: ProgramAccount<'info, SubscrData>,
+    pub merchant_key: AccountInfo<'info>,
+    #[account(mut)]
+    pub merchant_approval: AccountInfo<'info>,
+    #[account(mut)]
+    pub merchant_token: AccountInfo<'info>,
     #[account(signer)]
     pub manager_key: AccountInfo<'info>,
     pub manager_approval: AccountInfo<'info>,
+    pub user_agent: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
+    pub token_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub token_account: AccountInfo<'info>,
+    #[account(mut)]
+    pub fees_account: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -787,11 +972,10 @@ pub struct DelegatedTransfer<'info> {
 pub struct SubscrData {
     pub user_key: Pubkey,               // The user that owns this subscription
     pub user_agent: Pubkey,             // The program derived address for token delegation
-    //pub approval_program: Pubkey,       // The address of the network authority program that signs approvals
+    pub approval_program: Pubkey,       // The address of the network authority program that signs approvals
     pub merchant_key: Pubkey,           // The merchant account that receives subscription payments
     pub merchant_approval: Pubkey,      // The merchant approval record from the network authority
     pub merchant_token: Pubkey,         // The merchant associated token account to receive payments for this token
-    //pub abort_authority: Pubkey,        // The abort authority from the network authority to abort in case of hacks
     pub manager_key: Pubkey,            // The rebill manager account being assigned
     pub manager_approval: Pubkey,       // The rebill manager approval from the network authority
     pub token_mint: Pubkey,             // The token mint to pay for the subscription
@@ -813,9 +997,51 @@ pub struct SubscrData {
     pub active: bool,                   // Subscription is active
 }
 
-// TODO: Merchant approval
-// TODO: Rebill approval
-// TODO: Abort authority
+impl Default for SubscrData {
+    fn default() -> Self {
+        Self {
+            user_key: Pubkey::default(),
+            user_agent: Pubkey::default(),
+            approval_program: Pubkey::default(),
+            merchant_key: Pubkey::default(),
+            merchant_approval: Pubkey::default(),
+            merchant_token: Pubkey::default(),
+            manager_key: Pubkey::default(),
+            manager_approval: Pubkey::default(),
+            token_mint: Pubkey::default(),
+            token_account: Pubkey::default(),
+            rebill_data: Pubkey::default(),
+            rebill_events: 0,
+            rebill_max: 0,
+            next_rebill: 0,
+            not_valid_before: 0,
+            not_valid_after: 0,
+            max_delay: 0,
+            subscr_uuid: 0,
+            rebill_uuid: 0,
+            period: 0,
+            budget: 0,
+            pause_enabled: false,
+            paused: false,
+            active: false,
+        }
+    }
+}
+
+#[account]
+pub struct MerchantApproval {
+    pub active: bool,
+    pub merchant_key: Pubkey,
+    pub token_mint: Pubkey,
+    pub fees_account: Pubkey,
+    pub fees_bps: u32,
+}
+
+#[account]
+pub struct ManagerApproval {
+    pub active: bool,
+    pub manager_key: Pubkey,
+}
 
 #[account]
 pub struct TokenAllowance {
@@ -851,6 +1077,10 @@ pub enum ErrorCode {
     InvalidAccount,
     #[msg("Invalid nonce")]
     InvalidNonce,
+    #[msg("Not approved")]
+    NotApproved,
+    #[msg("Budget exceeded")]
+    BudgetExceeded,
     #[msg("Allowance exceeded")]
     AllowanceExceeded,
     #[msg("Subscription not valid yet")]
