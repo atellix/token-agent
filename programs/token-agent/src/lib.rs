@@ -57,7 +57,7 @@ mod token_agent {
     pub fn subscribe(ctx: Context<CreateSubscr>,
         link_token: bool,
         initial_amount: u64,
-        initial_tx_uuid: u128,
+        _initial_tx_uuid: u128,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
         inp_subscr_uuid: u128,
