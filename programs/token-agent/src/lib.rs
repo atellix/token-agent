@@ -1,5 +1,5 @@
 //use uuid::Uuid;
-use std::{ string::String, result::Result as FnResult, str::FromStr };
+use std::{ io::Cursor, string::String, result::Result as FnResult, str::FromStr };
 //use bytemuck::{ Pod, Zeroable };
 use num_enum::TryFromPrimitive;
 use chrono::{ NaiveDateTime, Datelike };
@@ -48,6 +48,14 @@ fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<Str
         return Err(ErrorCode::InvalidAccount.into());
     }
     Ok(())
+}
+
+#[inline]
+fn store_struct<T: AccountSerialize>(obj: &T, acc: &AccountInfo) -> FnResult<(), ProgramError> {
+    let mut data = acc.try_borrow_mut_data()?;
+    let dst: &mut [u8] = &mut data;
+    let mut crs = Cursor::new(dst);
+    obj.try_serialize(&mut crs)
 }
 
 #[program]
@@ -244,7 +252,7 @@ mod token_agent {
         }
 
         // Create subscription data
-        let subscr = &mut ctx.accounts.subscr_data;
+        let mut subscr = SubscrData::default();
         subscr.user_key = *ctx.accounts.user_key.to_account_info().key;
         subscr.user_agent = *ctx.accounts.user_agent.to_account_info().key;
         subscr.approval_program = *ctx.accounts.net_auth.to_account_info().key;
@@ -268,6 +276,7 @@ mod token_agent {
         subscr.pause_enabled = inp_pause_enabled;
         subscr.paused = false;
         subscr.active = true;
+        store_struct::<SubscrData>(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
         // TODO: Log event
 
@@ -880,7 +889,7 @@ mod token_agent {
 #[derive(Accounts)]
 pub struct CreateSubscr<'info> {
     #[account(mut)]
-    pub subscr_data: ProgramAccount<'info, SubscrData>,
+    pub subscr_data: AccountInfo<'info>,
     pub net_auth: AccountInfo<'info>,
     pub merchant_key: AccountInfo<'info>,
     #[account(mut)]

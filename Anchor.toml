@@ -2,7 +2,7 @@
 url = "https://anchor.projectserum.com"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "/Users/mfrager/.config/solana/id.json"
 
 [scripts]
