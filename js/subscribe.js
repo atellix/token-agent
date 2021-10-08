@@ -7,8 +7,8 @@ const fs = require('fs').promises
 const base32 = require("base32.js")
 
 const anchor = require('@project-serum/anchor')
-//const provider = anchor.Provider.env()
-const provider = anchor.Provider.local()
+const provider = anchor.Provider.env()
+//const provider = anchor.Provider.local()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
 const tokenAgentPK = tokenAgent.programId
@@ -70,7 +70,7 @@ async function main() {
 
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
-    if (false) {
+    if (true) {
         console.log('Fund Token: Merchant')
         await tokenAgent.rpc.fundToken(
             merchantTK.nonce,
@@ -89,7 +89,9 @@ async function main() {
                 ]
             }
         )
+    }
 
+    if (false) {
         console.log('Fund Token: Fees')
         await tokenAgent.rpc.fundToken(
             feesTK.nonce,

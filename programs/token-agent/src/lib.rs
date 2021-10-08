@@ -13,6 +13,8 @@ use solana_program::{
     clock::Clock,
 };
 
+declare_id!("yPiRxxJKpHoZhoDZZtSVbGBJMXT8e9FyG5cCmWxzgY7");
+
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
 pub enum SubscriptionPeriod {
