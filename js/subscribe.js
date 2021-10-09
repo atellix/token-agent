@@ -12,7 +12,7 @@ const provider = anchor.Provider.env()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
 const tokenAgentPK = tokenAgent.programId
-//console.log(tokenAgent)
+console.log(tokenAgent)
 
 const SPL_ASSOCIATED_TOKEN = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 async function associatedTokenAddress(walletAddress, tokenMintAddress) {
@@ -70,7 +70,7 @@ async function main() {
 
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
-    if (true) {
+    if (false) {
         console.log('Fund Token: Merchant')
         await tokenAgent.rpc.fundToken(
             merchantTK.nonce,
@@ -166,6 +166,21 @@ async function main() {
 
     if (true) {
         console.log('Process 1')
+
+        console.log({
+            subscrData: subscrData.publicKey.toString(),
+            merchantKey: merchantPK.toString(),
+            merchantApproval: merchantAP.toString(),
+            merchantToken: new PublicKey(merchantTK.pubkey).toString(),
+            managerKey: managerPK.toString(),
+            managerApproval: managerAP.toString(),
+            userAgent: new PublicKey(userAgent.pubkey).toString(),
+            tokenProgram: TOKEN_PROGRAM_ID.toString(),
+            tokenMint: tokenMint.toString(),
+            tokenAccount: tokenAccount.toString(),
+            feesAccount: new PublicKey(feesTK.pubkey).toString(),
+        })
+
         var eventId = uuidv4()
         var dt1 = dt0.plus({ months: 1 })
         var dts1 = dt1.toFormat("yyyyLL")

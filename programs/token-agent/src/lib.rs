@@ -178,7 +178,7 @@ mod token_agent {
             ctx.program_id
         ).map_err(|_| ErrorCode::InvalidNonce)?;
         if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
-            msg!("Invalid merchant token account");
+            msg!("Invalid user agent account");
             return Err(ErrorCode::InvalidDerivedAccount.into());
         }
 
@@ -396,10 +396,9 @@ mod token_agent {
             ],
             ctx.program_id
         ).map_err(|_| ErrorCode::InvalidNonce)?;
-        if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
-            msg!("Invalid merchant token account");
-            return Err(ErrorCode::InvalidDerivedAccount.into());
-        }
+        verify_matching_accounts(&derived_user_key, ctx.accounts.user_agent.to_account_info().key,
+            Some(String::from("Invalid user agent account"))
+        )?;
 
         // Verfiy token account and mint
         verify_matching_accounts(&subscr.token_account, &ctx.accounts.token_account.to_account_info().key,
@@ -421,10 +420,9 @@ mod token_agent {
             ],
             &asc_token
         ).map_err(|_| ErrorCode::InvalidNonce)?;
-        if derived_merchant_key != *ctx.accounts.merchant_token.to_account_info().key {
-            msg!("Invalid merchant token account");
-            return Err(ErrorCode::InvalidDerivedAccount.into());
-        }
+        verify_matching_accounts(&derived_merchant_key, ctx.accounts.merchant_token.to_account_info().key,
+            Some(String::from("Invalid merchant token account"))
+        )?;
 
         // Verify network authority accounts
         let acc_mrch_approve = &ctx.accounts.merchant_approval.to_account_info();
