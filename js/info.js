@@ -40,6 +40,8 @@ async function main() {
     var act = await tokenAgent.account.subscrData.fetch(new PublicKey('2C3DzW6SBAQ4U7SRRe6g51j2Lbpt3GY4Byef9BeoF7LT'))
     console.log('User Key: ' + act.userKey.toString())
     console.log('User Agent: ' + act.userAgent.toString())
+    console.log('Budget: ' + act.budget.toString())
+    console.log(act)
 }
 
 console.log('Begin')

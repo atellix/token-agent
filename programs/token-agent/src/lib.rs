@@ -7,11 +7,13 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{ self, Transfer, Approve };
 use solana_program::{
     sysvar, system_instruction,
-    instruction::{AccountMeta, Instruction},
+    instruction::{ AccountMeta, Instruction },
     program::{ invoke, invoke_signed },
     account_info::AccountInfo,
     clock::Clock,
 };
+
+use net_authority::{ cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 
 declare_id!("yPiRxxJKpHoZhoDZZtSVbGBJMXT8e9FyG5cCmWxzgY7");
 
@@ -67,9 +69,11 @@ mod token_agent {
     pub fn subscribe(ctx: Context<CreateSubscr>,
         link_token: bool,
         initial_amount: u64,
-        _initial_tx_uuid: u128,
+        _initial_tx_uuid: u128, // TODO: THIS!
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
+        inp_root_nonce: u8,
+        inp_net_nonce: u8,
         inp_subscr_uuid: u128,
         inp_period: u8,
         inp_budget: u64,
@@ -92,8 +96,7 @@ mod token_agent {
         verify_matching_accounts(netauth, &acc_mgr_approve.owner,
             Some(String::from("Invalid manager approval owner"))
         )?;
-        let mut mrch_approval_data: &[u8] = &acc_mrch_approve.try_borrow_data()?;
-        let mrch_approval = MerchantApproval::try_deserialize(&mut mrch_approval_data)?;
+        let mrch_approval = &ctx.accounts.merchant_approval;
         if !mrch_approval.active {
             msg!("Inactive merchant approval");
             return Err(ErrorCode::NotApproved.into());
@@ -107,8 +110,7 @@ mod token_agent {
         verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
             Some(String::from("Fees account does not match approval"))
         )?;
-        let mut mgr_approval_data: &[u8] = &acc_mgr_approve.try_borrow_data()?;
-        let mgr_approval = ManagerApproval::try_deserialize(&mut mgr_approval_data)?;
+        let mgr_approval = &ctx.accounts.manager_approval;
         if !mgr_approval.active {
             msg!("Inactive manager approval");
             return Err(ErrorCode::NotApproved.into());
@@ -116,6 +118,11 @@ mod token_agent {
         verify_matching_accounts(&mgr_approval.manager_key, &ctx.accounts.manager_key.to_account_info().key,
             Some(String::from("Manager key does not match approval"))
         )?;
+
+        // Verify root key
+        let acc_root_expected = Pubkey::create_program_address(&[ctx.program_id.as_ref(), &[inp_root_nonce]], ctx.program_id)
+            .map_err(|_| ErrorCode::InvalidDerivedAccount)?;
+        verify_matching_accounts(ctx.accounts.root_key.to_account_info().key, &acc_root_expected, Some(String::from("Invalid root key")))?;
 
         // Verify input
         let period = SubscriptionPeriod::try_from_primitive(inp_period);
@@ -251,6 +258,20 @@ mod token_agent {
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
             token::transfer(cpi_ctx, amount)?;
+
+            // Record merchant revenue
+            let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+            let signer = &[&seeds[..]];
+            let na_accounts = RecordRevenue {
+                root_data: ctx.accounts.net_root.clone(),
+                auth_data: ctx.accounts.net_rbac.clone(),
+                revenue_admin: ctx.accounts.root_key.clone(),
+                merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
+            };
+            let na_program = ctx.accounts.net_auth.clone();
+            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
+            msg!("Atellix: Attempt to record revenue");
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }
 
         // Create subscription data
@@ -891,13 +912,16 @@ pub struct CreateSubscr<'info> {
     #[account(mut)]
     pub subscr_data: AccountInfo<'info>,
     pub net_auth: AccountInfo<'info>,
+    pub net_rbac: AccountInfo<'info>,
+    pub net_root: AccountInfo<'info>,
+    pub root_key: AccountInfo<'info>,
     pub merchant_key: AccountInfo<'info>,
     #[account(mut)]
-    pub merchant_approval: AccountInfo<'info>,
+    pub merchant_approval: Account<'info, MerchantApproval>,
     #[account(mut)]
     pub merchant_token: AccountInfo<'info>,
     pub manager_key: AccountInfo<'info>,
-    pub manager_approval: AccountInfo<'info>,
+    pub manager_approval: Account<'info, ManagerApproval>,
     #[account(signer)]
     pub user_key: AccountInfo<'info>,
     pub user_agent: AccountInfo<'info>,
@@ -1035,21 +1059,6 @@ impl Default for SubscrData {
             active: false,
         }
     }
-}
-
-#[account]
-pub struct MerchantApproval {
-    pub active: bool,
-    pub merchant_key: Pubkey,
-    pub token_mint: Pubkey,
-    pub fees_account: Pubkey,
-    pub fees_bps: u32,
-}
-
-#[account]
-pub struct ManagerApproval {
-    pub active: bool,
-    pub manager_key: Pubkey,
 }
 
 #[account]

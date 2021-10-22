@@ -12,7 +12,7 @@ const provider = anchor.Provider.env()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
 const tokenAgentPK = tokenAgent.programId
-console.log(tokenAgent)
+//console.log(tokenAgent)
 
 const SPL_ASSOCIATED_TOKEN = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 async function associatedTokenAddress(walletAddress, tokenMintAddress) {
@@ -24,8 +24,8 @@ async function associatedTokenAddress(walletAddress, tokenMintAddress) {
     return res
 }
 
-async function programAddress(inputs) {
-    const addr = await PublicKey.findProgramAddress(inputs, tokenAgentPK)
+async function programAddress(inputs, programPK = tokenAgentPK) {
+    const addr = await PublicKey.findProgramAddress(inputs, programPK)
     const res = { 'pubkey': await addr[0].toString(), 'nonce': addr[1] }
     return res
 }
@@ -50,6 +50,10 @@ async function main() {
     const walletToken = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
     const tokenAccount = new PublicKey(walletToken.pubkey)
 
+    const rootKey = await programAddress([tokenAgentPK.toBuffer()])
+    const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
+    const netRBAC = new PublicKey(netData.netAuthorityRBAC)
+
     const subscrId = uuidv4()
     const subscrData = anchor.web3.Keypair.generate()
     const subscrDataBytes = tokenAgent.account.subscrData.size
@@ -67,6 +71,13 @@ async function main() {
     const managerAP = new PublicKey(netData.managerApproval1)
     const feesPK = new PublicKey(netData.fees1)
     const feesTK = await associatedTokenAddress(feesPK, tokenMint)
+
+    console.log('Token Account Mint: ' + tokenMint.toString())
+    console.log('Token Account Owner: ' + provider.wallet.publicKey.toString())
+    console.log('Token Account Assoc: ' + tokenAccount.toString())
+
+    console.log('Merchant Account: ' + merchantPK.toString())
+    console.log('Merchant Token: ' + merchantTK.pubkey)
 
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
@@ -137,6 +148,8 @@ async function main() {
         new anchor.BN(uuidparse(transactId)),           // initial_tx_uuid
         userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
+        rootKey.nonce,                                  // inp_root_nonce
+        netRoot.nonce,                                  // inp_net_nonce
         new anchor.BN(uuidparse(subscrId)),             // inp_subscr_uuid
         2,                                              // inp_period (2 = monthly)
         new anchor.BN(10000),                           // inp_budget
@@ -149,6 +162,9 @@ async function main() {
             accounts: {
                 subscrData: subscrData.publicKey,
                 netAuth: netAuth,
+                netRoot: new PublicKey(netRoot.pubkey),
+                netRbac: netRBAC,
+                rootKey: new PublicKey(rootKey.pubkey),
                 merchantKey: merchantPK,
                 merchantApproval: merchantAP,
                 merchantToken: new PublicKey(merchantTK.pubkey),
@@ -164,7 +180,7 @@ async function main() {
         }
     )
 
-    if (true) {
+    if (false) {
         console.log('Process 1')
 
         console.log({

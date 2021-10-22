@@ -339,6 +339,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "byte-slice-cast"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d30c751592b77c499e7bce34d99d67c2c11bdc0574e9a488ddade14150a4698"
+
+[[package]]
 name = "bytemuck"
 version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -420,6 +426,20 @@ dependencies = [
  "rand_core",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "decode-account"
+version = "1.7.8"
+dependencies = [
+ "base64 0.12.3",
+ "bincode",
+ "bs58 0.3.1",
+ "lazy_static",
+ "serde",
+ "serde_derive",
+ "solana-program",
+ "thiserror",
 ]
 
 [[package]]
@@ -709,6 +729,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59accc507f1338036a0477ef61afdae33cde60840f4dfe481319ce3ad116ddf9"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "murmur3"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ead5388e485d38e622630c6b05afd3761a6701ff15c55b279ea5b31dcb62cff"
+
+[[package]]
+name = "net-authority"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "byte-slice-cast",
+ "bytemuck",
+ "decode-account",
+ "num_enum",
+ "slab-alloc",
+ "solana-program",
+ "uuid",
 ]
 
 [[package]]
@@ -1051,6 +1091,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-alloc"
+version = "1.0.0"
+dependencies = [
+ "arrayref",
+ "bytemuck",
+ "murmur3",
+ "num_enum",
+ "solana-program",
+ "static_assertions",
+ "thiserror",
+]
+
+[[package]]
 name = "solana-frozen-abi"
 version = "1.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1225,6 +1278,7 @@ dependencies = [
  "anchor-spl",
  "bytemuck",
  "chrono",
+ "net-authority",
  "num_enum",
  "solana-program",
 ]
@@ -1261,6 +1315,12 @@ name = "unicode-xid"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
+
+[[package]]
+name = "uuid"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 
 [[package]]
 name = "version_check"
