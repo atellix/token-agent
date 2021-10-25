@@ -82,6 +82,7 @@ mod token_agent {
         inp_rebill_max: u32,
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
+        inp_swap: bool,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
@@ -225,6 +226,9 @@ mod token_agent {
 
         // Perform transfer
         if initial_amount > 0 {
+            // Swap if requested
+
+            // Transfer tokens
             let seeds = &[
                 ctx.accounts.user_key.to_account_info().key.as_ref(),
                 &[inp_user_nonce],
@@ -380,6 +384,8 @@ mod token_agent {
     pub fn process(ctx: Context<ProcessSubscr>,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
+        inp_root_nonce: u8,
+        inp_net_nonce: u8,
         inp_rebill_uuid: u128,
         inp_rebill_ts: i64,
         inp_rebill_str: String,
@@ -399,7 +405,7 @@ mod token_agent {
             msg!("Invalid account: manager_approval does not match subscription");
             return Err(ErrorCode::InvalidAccount.into());
         }
-        // TODO: Ensure manager_approval matches manager
+
         if !subscr.active {
             msg!("Inactive subscription");
             return Err(ErrorCode::InactiveSubscription.into());
@@ -454,8 +460,7 @@ mod token_agent {
         verify_matching_accounts(&subscr.approval_program, &acc_mgr_approve.owner,
             Some(String::from("Invalid manager approval owner"))
         )?;
-        let mut mrch_approval_data: &[u8] = &acc_mrch_approve.try_borrow_data()?;
-        let mrch_approval = MerchantApproval::try_deserialize(&mut mrch_approval_data)?;
+        let mrch_approval = &ctx.accounts.merchant_approval;
         if !mrch_approval.active {
             msg!("Inactive merchant approval");
             return Err(ErrorCode::NotApproved.into());
@@ -469,8 +474,7 @@ mod token_agent {
         verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
             Some(String::from("Fees account does not match approval"))
         )?;
-        let mut mgr_approval_data: &[u8] = &acc_mgr_approve.try_borrow_data()?;
-        let mgr_approval = ManagerApproval::try_deserialize(&mut mgr_approval_data)?;
+        let mgr_approval = &ctx.accounts.manager_approval;
         if !mgr_approval.active {
             msg!("Inactive manager approval");
             return Err(ErrorCode::NotApproved.into());
@@ -568,6 +572,20 @@ mod token_agent {
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
             token::transfer(cpi_ctx, amount)?;
+
+            // Record merchant revenue
+            let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+            let signer = &[&seeds[..]];
+            let na_accounts = RecordRevenue {
+                root_data: ctx.accounts.net_root.clone(),
+                auth_data: ctx.accounts.net_rbac.clone(),
+                revenue_admin: ctx.accounts.root_key.clone(),
+                merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
+            };
+            let na_program = ctx.accounts.net_auth.clone();
+            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
+            msg!("Atellix: Attempt to record revenue");
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }
 
         // Update parameters
@@ -937,14 +955,18 @@ pub struct CreateSubscr<'info> {
 pub struct ProcessSubscr<'info> {
     #[account(mut)]
     pub subscr_data: ProgramAccount<'info, SubscrData>,
+    pub net_auth: AccountInfo<'info>,
+    pub net_rbac: AccountInfo<'info>,
+    pub net_root: AccountInfo<'info>,
+    pub root_key: AccountInfo<'info>,
     pub merchant_key: AccountInfo<'info>,
     #[account(mut)]
-    pub merchant_approval: AccountInfo<'info>,
+    pub merchant_approval: Account<'info, MerchantApproval>,
     #[account(mut)]
     pub merchant_token: AccountInfo<'info>,
     #[account(signer)]
     pub manager_key: AccountInfo<'info>,
-    pub manager_approval: AccountInfo<'info>,
+    pub manager_approval: Account<'info, ManagerApproval>,
     pub user_agent: AccountInfo<'info>,
     pub token_program: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,

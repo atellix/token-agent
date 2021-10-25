@@ -180,7 +180,7 @@ async function main() {
         }
     )
 
-    if (false) {
+    if (true) {
         console.log('Process 1')
 
         console.log({
@@ -204,6 +204,8 @@ async function main() {
         const tx3 = await tokenAgent.transaction.process(
             userAgent.nonce,                                // inp_user_nonce
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
+            rootKey.nonce,                                  // inp_root_nonce
+            netRoot.nonce,                                  // inp_net_nonce
             new anchor.BN(uuidparse(eventId)),              // inp_rebill_uuid
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
             dts0,                                           // inp_rebill_str
@@ -212,6 +214,10 @@ async function main() {
             {
                 accounts: {
                     subscrData: subscrData.publicKey,
+                    netAuth: netAuth,
+                    netRoot: new PublicKey(netRoot.pubkey),
+                    netRbac: netRBAC,
+                    rootKey: new PublicKey(rootKey.pubkey),
                     merchantKey: merchantPK,
                     merchantApproval: merchantAP,
                     merchantToken: new PublicKey(merchantTK.pubkey),
