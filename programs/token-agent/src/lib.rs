@@ -84,6 +84,7 @@ mod token_agent {
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
         inp_swap: bool,
+        inp_swap_link: bool,
         inp_swap_root_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
@@ -229,21 +230,37 @@ mod token_agent {
         }
 
         // Perform transfer
+        let mut swap_account: Pubkey = Pubkey::default();
         if initial_amount > 0 {
             // Swap if requested
             if inp_swap {
-                let sw_program = ctx.remaining_accounts.get(0).unwrap().clone();
+                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+
+                // Setup up token delegate if needed
+                if inp_swap_link {
+                    let cpi_accounts = Approve {
+                        to: acc_swap_token.clone(),
+                        delegate: ctx.accounts.user_agent.to_account_info(),
+                        authority: ctx.accounts.user_key.to_account_info(),
+                    };
+                    let cpi_program = ctx.accounts.token_program.clone();
+                    let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+                    token::approve(cpi_ctx, u64::MAX)?;
+                }
+                msg!("Atellix: Attempt swap");
+                swap_account = acc_swap_token.key();
+                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
                 let sw_accounts = Swap {
-                    root_data: ctx.remaining_accounts.get(1).unwrap().clone(),
-                    auth_data: ctx.remaining_accounts.get(2).unwrap().clone(),
-                    swap_user: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    swap_data: ctx.remaining_accounts.get(4).unwrap().clone(),
-                    inb_info: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    inb_token_src: ctx.remaining_accounts.get(6).unwrap().clone(), // User Swap Source Token
+                    root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                    auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
+                    swap_user: ctx.remaining_accounts.get(4).unwrap().clone(),
+                    swap_data: ctx.remaining_accounts.get(5).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    inb_token_src: acc_swap_token.clone(),
                     inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
                     out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
                     out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(), // User Payment Token
+                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // User Payment Token
                     fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
@@ -316,6 +333,7 @@ mod token_agent {
         subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
         subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
+        subscr.swap_account = swap_account;
         subscr.rebill_events = 0;
         subscr.rebill_max = inp_rebill_max;
         subscr.next_rebill = inp_next_rebill;
@@ -329,6 +347,7 @@ mod token_agent {
         subscr.pause_enabled = inp_pause_enabled;
         subscr.paused = false;
         subscr.active = true;
+        subscr.swap = inp_swap;
         store_struct::<SubscrData>(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
         // TODO: Log event
@@ -407,7 +426,7 @@ mod token_agent {
         Ok(())
     } */
 
-    pub fn process(ctx: Context<ProcessSubscr>,
+    pub fn process<'info>(ctx: Context<'_, '_, '_, 'info, ProcessSubscr<'info>>,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
@@ -417,6 +436,9 @@ mod token_agent {
         inp_rebill_str: String,
         inp_next_rebill: i64,
         inp_amount: u64,
+        inp_swap_root_nonce: u8,
+        inp_swap_inb_nonce: u8,
+        inp_swap_out_nonce: u8,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
@@ -564,6 +586,37 @@ mod token_agent {
         msg!("Atellix: Process rebill");
 
         if inp_amount > 0 {
+            // Swap if requested
+            if subscr.swap {
+                msg!("Atellix: Attempt swap");
+                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                verify_matching_accounts(&subscr.swap_account, &acc_swap_token.key(),
+                    Some(String::from("Swap token does not match subscription"))
+                )?;
+                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                let sw_accounts = Swap {
+                    root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                    auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
+                    swap_user: ctx.remaining_accounts.get(4).unwrap().clone(),      // User Agent PDA (signer)
+                    swap_data: ctx.remaining_accounts.get(5).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    inb_token_src: acc_swap_token.clone(),
+                    inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
+                    out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
+                    out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
+                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // User Payment Token
+                    fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                };
+                let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+                let signer = &[&seeds[..]];
+                let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, signer);
+                if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
+                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
+                }
+                swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
+            }
+
             let seeds = &[
                 subscr.user_key.as_ref(),
                 &[inp_user_nonce],
@@ -1061,6 +1114,7 @@ pub struct SubscrData {
     pub manager_approval: Pubkey,       // The rebill manager approval from the network authority
     pub token_mint: Pubkey,             // The token mint to pay for the subscription
     pub token_account: Pubkey,          // The token account to pay for the subscription
+    pub swap_account: Pubkey,           // The token account to swap from if using a different mint for payments
     pub rebill_data: Pubkey,            // The rebill data account to track subscription rebills and prevent duplicates
     // Subscription details below
     pub rebill_events: u32,             // Count of rebill events
@@ -1076,6 +1130,7 @@ pub struct SubscrData {
     pub pause_enabled: bool,            // Subscription able to be paused
     pub paused: bool,                   // Subscription is paused
     pub active: bool,                   // Subscription is active
+    pub swap: bool,                     // Swap tokens before payment
 }
 
 impl Default for SubscrData {
@@ -1091,6 +1146,7 @@ impl Default for SubscrData {
             manager_approval: Pubkey::default(),
             token_mint: Pubkey::default(),
             token_account: Pubkey::default(),
+            swap_account: Pubkey::default(),
             rebill_data: Pubkey::default(),
             rebill_events: 0,
             rebill_max: 0,
@@ -1105,6 +1161,7 @@ impl Default for SubscrData {
             pause_enabled: false,
             paused: false,
             active: false,
+            swap: false,
         }
     }
 }
