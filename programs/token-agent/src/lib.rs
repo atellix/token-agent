@@ -14,6 +14,7 @@ use solana_program::{
 };
 
 use net_authority::{ cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
+use swap_contract::{ cpi::accounts::Swap };
 
 declare_id!("yPiRxxJKpHoZhoDZZtSVbGBJMXT8e9FyG5cCmWxzgY7");
 
@@ -66,7 +67,7 @@ fn store_struct<T: AccountSerialize>(obj: &T, acc: &AccountInfo) -> FnResult<(),
 mod token_agent {
     use super::*;
 
-    pub fn subscribe(ctx: Context<CreateSubscr>,
+    pub fn subscribe<'info>(ctx: Context<'_, '_, '_, 'info, CreateSubscr<'info>>,
         link_token: bool,
         initial_amount: u64,
         _initial_tx_uuid: u128, // TODO: THIS!
@@ -83,6 +84,9 @@ mod token_agent {
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
         inp_swap: bool,
+        inp_swap_root_nonce: u8,
+        inp_swap_inb_nonce: u8,
+        inp_swap_out_nonce: u8,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
@@ -227,6 +231,28 @@ mod token_agent {
         // Perform transfer
         if initial_amount > 0 {
             // Swap if requested
+            if inp_swap {
+                let sw_program = ctx.remaining_accounts.get(0).unwrap().clone();
+                let sw_accounts = Swap {
+                    root_data: ctx.remaining_accounts.get(1).unwrap().clone(),
+                    auth_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                    swap_user: ctx.remaining_accounts.get(3).unwrap().clone(),
+                    swap_data: ctx.remaining_accounts.get(4).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(5).unwrap().clone(),
+                    inb_token_src: ctx.remaining_accounts.get(6).unwrap().clone(), // User Swap Source Token
+                    inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
+                    out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
+                    out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
+                    out_token_dst: ctx.accounts.token_account.to_account_info(), // User Payment Token
+                    fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                };
+                let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
+                if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
+                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
+                }
+                swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, initial_amount)?;
+            }
 
             // Transfer tokens
             let seeds = &[
@@ -535,7 +561,7 @@ mod token_agent {
             return Err(ErrorCode::BudgetExceeded.into());
         }
 
-        msg!("Process rebill");
+        msg!("Atellix: Process rebill");
 
         if inp_amount > 0 {
             let seeds = &[

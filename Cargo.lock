@@ -866,6 +866,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-protobuf"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ca6639207ac869e31cca06b8adbc7676278f22b321e51115766009b4f192dbb"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -931,6 +940,27 @@ name = "regex-syntax"
 version = "0.6.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f497285884f3fcff424ffc933e56d7cbca511def0c9831a7f9b5f6153e3cc89b"
+
+[[package]]
+name = "rust_decimal"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353775f96a1f400edcca737f843cb201af3645912e741e64456a257c770173e8"
+dependencies = [
+ "arrayvec",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
+name = "rust_decimal_macros"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0847e5bbcded958275518f18a567fea27e53b22b52b549cc3557c88d780b22e"
+dependencies = [
+ "quote",
+ "rust_decimal",
+]
 
 [[package]]
 name = "rustc_version"
@@ -1231,6 +1261,67 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
+name = "swap-contract"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "byte-slice-cast",
+ "bytemuck",
+ "decode-account",
+ "net-authority",
+ "num_enum",
+ "slab-alloc",
+ "solana-program",
+ "switchboard-program",
+]
+
+[[package]]
+name = "switchboard-program"
+version = "0.1.58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34746324aa600a859045d5496ad316d52d2c55ff6ae99ed96aaeb6c41348b7f1"
+dependencies = [
+ "bincode",
+ "borsh",
+ "byteorder",
+ "quick-protobuf",
+ "solana-program",
+ "switchboard-protos",
+ "switchboard-utils",
+ "zerocopy",
+]
+
+[[package]]
+name = "switchboard-protos"
+version = "0.1.58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4480f75ff6438a5bf2e92339adca557b239529f12a841a692a5c40978072bebb"
+dependencies = [
+ "bincode",
+ "borsh",
+ "byteorder",
+ "quick-protobuf",
+]
+
+[[package]]
+name = "switchboard-utils"
+version = "0.1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87018418815036a7dc94f3fff9b4f01051c605b661d01c1d5f6b49728abe70ae"
+dependencies = [
+ "bincode",
+ "borsh",
+ "byteorder",
+ "quick-protobuf",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "solana-program",
+ "switchboard-protos",
+ "zerocopy",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1238,6 +1329,18 @@ checksum = "b7f58f7e8eaa0009c5fec437aabf511bd9933e4b2d7407bd05273c01a8906ea7"
 dependencies = [
  "proc-macro2",
  "quote",
+ "unicode-xid",
+]
+
+[[package]]
+name = "synstructure"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f36bdaa60a83aca3921b5259d5400cbf5e90fc51931376a9bd4a0eb79aa7210f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
  "unicode-xid",
 ]
 
@@ -1281,6 +1384,7 @@ dependencies = [
  "net-authority",
  "num_enum",
  "solana-program",
+ "swap-contract",
 ]
 
 [[package]]
@@ -1379,6 +1483,27 @@ name = "yansi"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fc79f4a1e39857fc00c3f662cbf2651c771f00e9c15fe2abc341806bd46bd71"
+
+[[package]]
+name = "zerocopy"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae0f717764196a220d8c58500e3a3595e2c9054f95d66267f9fd5f6e74ad0fec"
+dependencies = [
+ "byteorder",
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0af017aca1fa6181f5dd7a802456fe6f7666ecdcc18d0910431f0fc89d474e51"
+dependencies = [
+ "proc-macro2",
+ "syn",
+ "synstructure",
+]
 
 [[package]]
 name = "zeroize"
