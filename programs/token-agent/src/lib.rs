@@ -70,7 +70,7 @@ mod token_agent {
     pub fn subscribe<'info>(ctx: Context<'_, '_, '_, 'info, CreateSubscr<'info>>,
         link_token: bool,
         initial_amount: u64,
-        _initial_tx_uuid: u128, // TODO: THIS!
+        initial_tx_uuid: u128,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
@@ -247,7 +247,7 @@ mod token_agent {
                     let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
                     token::approve(cpi_ctx, u64::MAX)?;
                 }
-                msg!("Atellix: Attempt swap");
+                //msg!("Atellix: Attempt swap");
                 swap_account = acc_swap_token.key();
                 let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
                 let sw_accounts = Swap {
@@ -317,7 +317,7 @@ mod token_agent {
             };
             let na_program = ctx.accounts.net_auth.clone();
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
-            msg!("Atellix: Attempt to record revenue");
+            //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }
 
@@ -341,7 +341,7 @@ mod token_agent {
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.subscr_uuid = inp_subscr_uuid;
-        subscr.rebill_uuid = 0;
+        subscr.rebill_uuid = initial_tx_uuid;
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.pause_enabled = inp_pause_enabled;
@@ -350,7 +350,26 @@ mod token_agent {
         subscr.swap = inp_swap;
         store_struct::<SubscrData>(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
-        // TODO: Log event
+        msg!("atellix-log");
+        emit!(SubscrEvent {
+            event_hash: 176440469768111763486207729736362869784, // solana/program/token-agent/subscribe
+            slot: clock.slot,
+            merchant_key: ctx.accounts.merchant_key.key(),
+            merchant_token: ctx.accounts.merchant_token.key(),
+            manager_key: ctx.accounts.manager_key.key(),
+            user_key: ctx.accounts.user_key.key(),
+            token_account: ctx.accounts.token_account.key(),
+            token_mint: ctx.accounts.token_mint.key(),
+            fees_account: ctx.accounts.fees_account.key(),
+            subscr_uuid: inp_subscr_uuid,
+            rebill_uuid: initial_tx_uuid,
+            amount: initial_amount,
+            next_rebill: inp_next_rebill,
+            paused: false,
+            swap: inp_swap,
+            swap_account: if inp_swap { ctx.remaining_accounts.get(0).unwrap().key() } else { Pubkey::default() },
+            swap_data: if inp_swap { ctx.remaining_accounts.get(5).unwrap().key() } else { Pubkey::default() },
+        });
 
         Ok(())
     }
@@ -583,12 +602,12 @@ mod token_agent {
             return Err(ErrorCode::BudgetExceeded.into());
         }
 
-        msg!("Atellix: Process rebill");
+        //msg!("Atellix: Process rebill");
 
         if inp_amount > 0 {
             // Swap if requested
             if subscr.swap {
-                msg!("Atellix: Attempt swap");
+                //msg!("Atellix: Attempt swap");
                 let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
                 verify_matching_accounts(&subscr.swap_account, &acc_swap_token.key(),
                     Some(String::from("Swap token does not match subscription"))
@@ -641,7 +660,7 @@ mod token_agent {
                     let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
                     token::transfer(cpi_ctx, fees)?;
                 }
-                msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
+                //msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
             }
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
@@ -663,7 +682,7 @@ mod token_agent {
             };
             let na_program = ctx.accounts.net_auth.clone();
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
-            msg!("Atellix: Attempt to record revenue");
+            //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }
 
@@ -671,6 +690,28 @@ mod token_agent {
         subscr.next_rebill = inp_next_rebill;
         subscr.rebill_uuid = inp_rebill_uuid;
         subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+
+        msg!("atellix-log");
+        emit!(SubscrEvent {
+            event_hash: 196800858676461937700417377973077375575, // solana/program/token-agent/process
+            slot: clock.slot,
+            merchant_key: ctx.accounts.merchant_key.key(),
+            merchant_token: ctx.accounts.merchant_token.key(),
+            manager_key: ctx.accounts.manager_key.key(),
+            user_key: Pubkey::default(),
+            token_account: ctx.accounts.token_account.key(),
+            token_mint: ctx.accounts.token_mint.key(),
+            fees_account: ctx.accounts.fees_account.key(),
+            subscr_uuid: subscr.subscr_uuid,
+            rebill_uuid: inp_rebill_uuid,
+            amount: inp_amount,
+            next_rebill: inp_next_rebill,
+            paused: false,
+            swap: subscr.swap,
+            swap_account: if subscr.swap { ctx.remaining_accounts.get(0).unwrap().key() } else { Pubkey::default() },
+            swap_data: if subscr.swap { ctx.remaining_accounts.get(5).unwrap().key() } else { Pubkey::default() },
+        });
+
         Ok(())
     }
 
@@ -1178,6 +1219,27 @@ pub struct TokenAllowance {
     pub not_valid_before: i64,          // UTC timestamp before which no subscription processing can occur
     pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
     pub amount: u64,                    // The amount of tokens for the allowance (same decimals as underlying token)
+}
+
+#[event]
+pub struct SubscrEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub merchant_key: Pubkey,
+    pub merchant_token: Pubkey,
+    pub manager_key: Pubkey,
+    pub user_key: Pubkey,
+    pub token_account: Pubkey,
+    pub token_mint: Pubkey,
+    pub fees_account: Pubkey,
+    pub subscr_uuid: u128,
+    pub rebill_uuid: u128,
+    pub amount: u64,
+    pub next_rebill: i64,
+    pub paused: bool,
+    pub swap: bool,
+    pub swap_account: Pubkey,
+    pub swap_data: Pubkey,
 }
 
 #[error]
