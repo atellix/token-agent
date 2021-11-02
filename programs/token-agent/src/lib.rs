@@ -1188,8 +1188,6 @@ pub enum ErrorCode {
     InvalidProgramId,
     #[msg("Invalid subscription period")]
     InvalidSubscriptionPeriod,
-    #[msg("Invalid max delay")]
-    InvalidMaxDelay,
     #[msg("Invalid derived account")]
     InvalidDerivedAccount,
     #[msg("Invalid timeframe")]
