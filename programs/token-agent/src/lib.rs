@@ -79,7 +79,6 @@ mod token_agent {
         inp_period: u8,
         inp_budget: u64,
         inp_next_rebill: i64,
-        inp_pause_enabled: bool,
         inp_rebill_max: u32,
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
@@ -344,13 +343,11 @@ mod token_agent {
         subscr.rebill_uuid = initial_tx_uuid;
         subscr.period = inp_period;
         subscr.budget = inp_budget;
-        subscr.pause_enabled = inp_pause_enabled;
-        subscr.paused = false;
         subscr.active = true;
         subscr.swap = inp_swap;
         store_struct::<SubscrData>(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
-        msg!("atellix-log");
+        /*msg!("atellix-log");
         emit!(SubscrEvent {
             event_hash: 176440469768111763486207729736362869784, // solana/program/token-agent/subscribe
             slot: clock.slot,
@@ -365,11 +362,10 @@ mod token_agent {
             rebill_uuid: initial_tx_uuid,
             amount: initial_amount,
             next_rebill: inp_next_rebill,
-            paused: false,
             swap: inp_swap,
             swap_account: if inp_swap { ctx.remaining_accounts.get(0).unwrap().key() } else { Pubkey::default() },
             swap_data: if inp_swap { ctx.remaining_accounts.get(5).unwrap().key() } else { Pubkey::default() },
-        });
+        });*/
 
         Ok(())
     }
@@ -691,7 +687,7 @@ mod token_agent {
         subscr.rebill_uuid = inp_rebill_uuid;
         subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
 
-        msg!("atellix-log");
+        /*msg!("atellix-log");
         emit!(SubscrEvent {
             event_hash: 196800858676461937700417377973077375575, // solana/program/token-agent/process
             slot: clock.slot,
@@ -706,11 +702,10 @@ mod token_agent {
             rebill_uuid: inp_rebill_uuid,
             amount: inp_amount,
             next_rebill: inp_next_rebill,
-            paused: false,
             swap: subscr.swap,
             swap_account: if subscr.swap { ctx.remaining_accounts.get(0).unwrap().key() } else { Pubkey::default() },
             swap_data: if subscr.swap { ctx.remaining_accounts.get(5).unwrap().key() } else { Pubkey::default() },
-        });
+        });*/
 
         Ok(())
     }
@@ -1168,8 +1163,6 @@ pub struct SubscrData {
     pub rebill_uuid: u128,              // Last Rebill UUID
     pub period: u8,                     // Subscription rebill period
     pub budget: u64,                    // Subscription budget (maximum amount, not necessarily the amount that will be billed which could be less)
-    pub pause_enabled: bool,            // Subscription able to be paused
-    pub paused: bool,                   // Subscription is paused
     pub active: bool,                   // Subscription is active
     pub swap: bool,                     // Swap tokens before payment
 }
@@ -1199,8 +1192,6 @@ impl Default for SubscrData {
             rebill_uuid: 0,
             period: 0,
             budget: 0,
-            pause_enabled: false,
-            paused: false,
             active: false,
             swap: false,
         }
@@ -1221,7 +1212,8 @@ pub struct TokenAllowance {
     pub amount: u64,                    // The amount of tokens for the allowance (same decimals as underlying token)
 }
 
-#[event]
+// Disabled until there is more headroom in Solana transaction compute units
+/*#[event]
 pub struct SubscrEvent {
     pub event_hash: u128,
     pub slot: u64,
@@ -1236,11 +1228,10 @@ pub struct SubscrEvent {
     pub rebill_uuid: u128,
     pub amount: u64,
     pub next_rebill: i64,
-    pub paused: bool,
     pub swap: bool,
     pub swap_account: Pubkey,
     pub swap_data: Pubkey,
-}
+}*/
 
 #[error]
 pub enum ErrorCode {

@@ -190,7 +190,6 @@ async function main() {
         2,                                              // inp_period (2 = monthly)
         new anchor.BN(150000),                          // inp_budget
         new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_next_rebill
-        false,                                          // inp_pause_enabled
         0,                                              // inp_rebill_max
         new anchor.BN(0),                               // inp_not_valid_before
         new anchor.BN(0),                               // inp_not_valid_after
