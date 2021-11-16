@@ -16,7 +16,7 @@ use solana_program::{
 use net_authority::{ cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
 
-declare_id!("yPiRxxJKpHoZhoDZZtSVbGBJMXT8e9FyG5cCmWxzgY7");
+declare_id!("3dPQNSLuCSGQEfufKD4Zc7o3vWpqPj88cPu5cxjHBkgH");
 
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
