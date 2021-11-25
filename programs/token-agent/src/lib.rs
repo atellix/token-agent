@@ -347,25 +347,17 @@ mod token_agent {
         subscr.swap = inp_swap;
         store_struct::<SubscrData>(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
-        /*msg!("atellix-log");
+        msg!("atellix-log");
         emit!(SubscrEvent {
             event_hash: 176440469768111763486207729736362869784, // solana/program/token-agent/subscribe
             slot: clock.slot,
-            merchant_key: ctx.accounts.merchant_key.key(),
-            merchant_token: ctx.accounts.merchant_token.key(),
-            manager_key: ctx.accounts.manager_key.key(),
-            user_key: ctx.accounts.user_key.key(),
-            token_account: ctx.accounts.token_account.key(),
-            token_mint: ctx.accounts.token_mint.key(),
-            fees_account: ctx.accounts.fees_account.key(),
+            subscr_data: ctx.accounts.subscr_data.key(),
             subscr_uuid: inp_subscr_uuid,
             rebill_uuid: initial_tx_uuid,
             amount: initial_amount,
             next_rebill: inp_next_rebill,
             swap: inp_swap,
-            swap_account: if inp_swap { ctx.remaining_accounts.get(0).unwrap().key() } else { Pubkey::default() },
-            swap_data: if inp_swap { ctx.remaining_accounts.get(5).unwrap().key() } else { Pubkey::default() },
-        });*/
+        });
 
         Ok(())
     }
@@ -687,25 +679,17 @@ mod token_agent {
         subscr.rebill_uuid = inp_rebill_uuid;
         subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
 
-        /*msg!("atellix-log");
+        msg!("atellix-log");
         emit!(SubscrEvent {
             event_hash: 196800858676461937700417377973077375575, // solana/program/token-agent/process
             slot: clock.slot,
-            merchant_key: ctx.accounts.merchant_key.key(),
-            merchant_token: ctx.accounts.merchant_token.key(),
-            manager_key: ctx.accounts.manager_key.key(),
-            user_key: Pubkey::default(),
-            token_account: ctx.accounts.token_account.key(),
-            token_mint: ctx.accounts.token_mint.key(),
-            fees_account: ctx.accounts.fees_account.key(),
+            subscr_data: subscr.key(),
             subscr_uuid: subscr.subscr_uuid,
             rebill_uuid: inp_rebill_uuid,
             amount: inp_amount,
             next_rebill: inp_next_rebill,
             swap: subscr.swap,
-            swap_account: if subscr.swap { ctx.remaining_accounts.get(0).unwrap().key() } else { Pubkey::default() },
-            swap_data: if subscr.swap { ctx.remaining_accounts.get(5).unwrap().key() } else { Pubkey::default() },
-        });*/
+        });
 
         Ok(())
     }
@@ -1200,7 +1184,6 @@ impl Default for SubscrData {
 
 #[account]
 pub struct TokenAllowance {
-    //pub abort_authority: Pubkey,        // The abort authority from the network authority to abort in case of hacks
     pub user_key: Pubkey,               // The user that owns the tokens
     pub user_agent: Pubkey,             // The program derived address for delegation of the SPL token
     pub delegate_key: Pubkey,           // The delegate granted an allowance of tokens to transfer
@@ -1212,26 +1195,17 @@ pub struct TokenAllowance {
     pub amount: u64,                    // The amount of tokens for the allowance (same decimals as underlying token)
 }
 
-// Disabled until there is more headroom in Solana transaction compute units
-/*#[event]
+#[event]
 pub struct SubscrEvent {
     pub event_hash: u128,
     pub slot: u64,
-    pub merchant_key: Pubkey,
-    pub merchant_token: Pubkey,
-    pub manager_key: Pubkey,
-    pub user_key: Pubkey,
-    pub token_account: Pubkey,
-    pub token_mint: Pubkey,
-    pub fees_account: Pubkey,
+    pub subscr_data: Pubkey,
     pub subscr_uuid: u128,
     pub rebill_uuid: u128,
     pub amount: u64,
     pub next_rebill: i64,
     pub swap: bool,
-    pub swap_account: Pubkey,
-    pub swap_data: Pubkey,
-}*/
+}
 
 #[error]
 pub enum ErrorCode {
