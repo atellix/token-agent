@@ -18,6 +18,9 @@ use swap_contract::{ cpi::accounts::Swap };
 
 declare_id!("3dPQNSLuCSGQEfufKD4Zc7o3vWpqPj88cPu5cxjHBkgH");
 
+pub const SPL_TOKEN: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+pub const ASC_TOKEN: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
 pub enum SubscriptionPeriod {
@@ -68,9 +71,9 @@ mod token_agent {
     use super::*;
 
     pub fn subscribe<'info>(ctx: Context<'_, '_, '_, 'info, CreateSubscr<'info>>,
-        link_token: bool,
-        initial_amount: u64,
-        initial_tx_uuid: u128,
+        inp_link_token: bool,
+        inp_initial_amount: u64,
+        inp_initial_tx_uuid: u128,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
@@ -195,8 +198,8 @@ mod token_agent {
         }
 
         // Verify merchant's associated token
-        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
-        let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
+        let asc_token: Pubkey = Pubkey::from_str(ASC_TOKEN).unwrap();
         let derived_merchant_key = Pubkey::create_program_address(
             &[
                 &ctx.accounts.merchant_key.to_account_info().key.to_bytes(),
@@ -217,7 +220,7 @@ mod token_agent {
         }
 
         // Setup up token delegate if needed
-        if link_token {
+        if inp_link_token {
             let cpi_accounts = Approve {
                 to: ctx.accounts.token_account.to_account_info(),
                 delegate: ctx.accounts.user_agent.to_account_info(),
@@ -230,7 +233,7 @@ mod token_agent {
 
         // Perform transfer
         let mut swap_account: Pubkey = Pubkey::default();
-        if initial_amount > 0 {
+        if inp_initial_amount > 0 {
             // Swap if requested
             if inp_swap {
                 let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
@@ -267,7 +270,7 @@ mod token_agent {
                 if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
                     sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
                 }
-                swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, initial_amount)?;
+                swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_initial_amount)?;
             }
 
             // Transfer tokens
@@ -278,7 +281,7 @@ mod token_agent {
             let signer = &[&seeds[..]];
 
             // Calculate fees
-            let mut amount: u64 = initial_amount;
+            let mut amount: u64 = inp_initial_amount;
             if mrch_approval.fees_bps > 0 {
                 let f1: u128 = (amount as u128) << 64;
                 let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
@@ -340,7 +343,7 @@ mod token_agent {
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.subscr_uuid = inp_subscr_uuid;
-        subscr.rebill_uuid = initial_tx_uuid;
+        subscr.rebill_uuid = inp_initial_tx_uuid;
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.active = true;
@@ -353,8 +356,9 @@ mod token_agent {
             slot: clock.slot,
             subscr_data: ctx.accounts.subscr_data.key(),
             subscr_uuid: inp_subscr_uuid,
-            rebill_uuid: initial_tx_uuid,
-            amount: initial_amount,
+            rebill_uuid: inp_initial_tx_uuid,
+            rebill_event: 0,
+            amount: inp_initial_amount,
             next_rebill: inp_next_rebill,
             swap: inp_swap,
         });
@@ -362,70 +366,206 @@ mod token_agent {
         Ok(())
     }
 
-    pub fn fund_token(ctx: Context<FundToken>, inp_nonce: u8) -> ProgramResult {
-        // Accounts
-        let av = ctx.remaining_accounts;
-        let funding_account = av.get(0).unwrap();
-        let token_mint = av.get(1).unwrap();
-        let token_owner = av.get(2).unwrap();
-        let token_account = av.get(3).unwrap();
-        let token_program = av.get(4).unwrap();
-        let sys_program = av.get(5).unwrap();
-        let system_rent = av.get(6).unwrap();
+    pub fn update_subscription<'info>(ctx: Context<'_, '_, '_, 'info, UpdateSubscr<'info>>,
+        inp_merchant_nonce: u8,
+        inp_link_token: bool,
+        inp_active: bool,
+        inp_period: u8,
+        inp_budget: u64,
+        inp_next_rebill: i64,
+        inp_rebill_max: u32,
+        inp_not_valid_before: i64,
+        inp_not_valid_after: i64,
+        inp_swap: bool,
+        inp_swap_link: bool,
+    ) -> ProgramResult {
+        let clock = Clock::get()?;
+        let ts = clock.unix_timestamp;
+        let subscr = &mut ctx.accounts.subscr_data;
 
-        // Verify merchant associated token
-        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
-        let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
-        let derived_key = Pubkey::create_program_address(
+        // Verify network authority is the same
+        let netauth = &ctx.accounts.net_auth.to_account_info().key;
+        verify_matching_accounts(netauth, &subscr.approval_program,
+            Some(String::from("Approval program does not match"))
+        )?;
+
+        // Verify user key and user agent are the same
+        verify_matching_accounts(&subscr.user_key, &ctx.accounts.user_key.to_account_info().key,
+            Some(String::from("User key does not match"))
+        )?;
+        verify_matching_accounts(&subscr.user_agent, &ctx.accounts.user_agent.to_account_info().key,
+            Some(String::from("User agent does not match"))
+        )?;
+
+        // Verify network authority accounts
+        let acc_mrch_approve = &ctx.accounts.merchant_approval.to_account_info();
+        let acc_mgr_approve = &ctx.accounts.manager_approval.to_account_info();
+        verify_matching_accounts(netauth, &acc_mrch_approve.owner,
+            Some(String::from("Invalid merchant approval owner"))
+        )?;
+        verify_matching_accounts(netauth, &acc_mgr_approve.owner,
+            Some(String::from("Invalid manager approval owner"))
+        )?;
+        let mrch_approval = &ctx.accounts.merchant_approval;
+        if !mrch_approval.active {
+            msg!("Inactive merchant approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mrch_approval.merchant_key, &ctx.accounts.merchant_key.to_account_info().key,
+            Some(String::from("Merchant key does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.token_mint, &ctx.accounts.token_mint.to_account_info().key,
+            Some(String::from("Token mint does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
+            Some(String::from("Fees account does not match approval"))
+        )?;
+        let mgr_approval = &ctx.accounts.manager_approval;
+        if !mgr_approval.active {
+            msg!("Inactive manager approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mgr_approval.manager_key, &ctx.accounts.manager_key.to_account_info().key,
+            Some(String::from("Manager key does not match approval"))
+        )?;
+
+        // Verify input
+        let period = SubscriptionPeriod::try_from_primitive(inp_period);
+        if period.is_err() {
+            msg!("Invalid subscription period");
+            return Err(ErrorCode::InvalidSubscriptionPeriod.into());
+        }
+        let max_delay: i64 = match period.unwrap() {                // Delay from start of billing cycle to accept rebills
+            SubscriptionPeriod::Daily => (60 * 60 * 48),            // 2 days
+            SubscriptionPeriod::Weekly => (60 * 60 * 24 * 14),      // 2 weeks
+            SubscriptionPeriod::Monthly => (60 * 60 * 24 * 60),     // ~2 months
+            SubscriptionPeriod::Quarterly => (60 * 60 * 24 * 180),  // ~2 quarters
+            SubscriptionPeriod::Yearly => (60 * 60 * 24 * 365 * 2), // ~2 years
+        };
+        if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
+            msg!("Invalid subscription start");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_after < 0 || (inp_not_valid_after > 0 && inp_not_valid_after < ts) {
+            msg!("Invalid subscription end");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_after != 0 && inp_not_valid_before != 0 {
+            if inp_not_valid_after <= inp_not_valid_before {
+                msg!("Invalid timeframe");
+                return Err(ErrorCode::InvalidTimeframe.into());
+            }
+        }
+        if inp_next_rebill < 0 {
+            msg!("Invalid negative next_rebill");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        if inp_not_valid_before > 0 && inp_next_rebill < inp_not_valid_before {
+            msg!("Next rebill is before start");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        let mut timeframe_start: i64 = ts;
+        if inp_not_valid_before > 0 {
+            timeframe_start = inp_not_valid_before;
+        }
+        let timeframe_end = timeframe_start.checked_add(max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        if inp_next_rebill < timeframe_start || inp_next_rebill > timeframe_end {
+            msg!("Next rebill not within timeframe");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+        let d1 = get_period_string(inp_next_rebill, period.unwrap())?;
+        let prev_period = inp_next_rebill.checked_sub(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let d2 = get_period_string(prev_period, period.unwrap())?;
+        if d1 == d2 {
+            msg!("Next rebill not beginning of period");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
+
+        // Verify merchant's associated token
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
+        let asc_token: Pubkey = Pubkey::from_str(ASC_TOKEN).unwrap();
+        let derived_merchant_key = Pubkey::create_program_address(
             &[
-                &token_owner.key.to_bytes(),
+                &ctx.accounts.merchant_key.to_account_info().key.to_bytes(),
                 &spl_token.to_bytes(),
-                &token_mint.key.to_bytes(),
-                &[inp_nonce]
+                &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                &[inp_merchant_nonce]
             ],
             &asc_token
         ).map_err(|_| ErrorCode::InvalidNonce)?;
-        if derived_key != *token_account.key {
-            msg!("Invalid token account");
+        if derived_merchant_key != *ctx.accounts.merchant_token.to_account_info().key {
+            msg!("Invalid merchant token account");
             return Err(ErrorCode::InvalidDerivedAccount.into());
         }
 
-        if spl_token != *token_program.key {
+        if spl_token != *ctx.accounts.token_program.to_account_info().key {
             msg!("Invalid token program id");
             return Err(ErrorCode::InvalidProgramId.into());
         }
 
-        if asc_token != *ctx.accounts.asc_token_account.to_account_info().key {
-            msg!("Invalid associated token program id");
-            return Err(ErrorCode::InvalidProgramId.into());
+        // Setup up token delegate if needed
+        if inp_link_token {
+            let cpi_accounts = Approve {
+                to: ctx.accounts.token_account.to_account_info(),
+                delegate: ctx.accounts.user_agent.to_account_info(),
+                authority: ctx.accounts.user_key.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+            token::approve(cpi_ctx, u64::MAX)?;
         }
 
-        // Fund associated token account
-        let instr = Instruction {
-            program_id: asc_token,
-            accounts: vec![
-                AccountMeta::new(*funding_account.key, true),
-                AccountMeta::new(*token_account.key, false),
-                AccountMeta::new_readonly(*token_owner.key, false),
-                AccountMeta::new_readonly(*token_mint.key, false),
-                AccountMeta::new_readonly(solana_program::system_program::id(), false),
-                AccountMeta::new_readonly(spl_token, false),
-                AccountMeta::new_readonly(sysvar::rent::id(), false),
-            ],
-            data: vec![],
-        };
-        invoke(
-            &instr,
-            &[
-                funding_account.clone(),
-                token_account.clone(),
-                token_owner.clone(),
-                token_mint.clone(),
-                sys_program.clone(),
-                token_program.clone(),
-                system_rent.clone(),
-            ]
-        )?;
+        // Link swap token if requested
+        let mut swap_account: Pubkey = Pubkey::default();
+        if inp_swap {
+            let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+            swap_account = acc_swap_token.key();
+
+            // Setup up token delegate if needed
+            if inp_swap_link {
+                let cpi_accounts = Approve {
+                    to: acc_swap_token.clone(),
+                    delegate: ctx.accounts.user_agent.to_account_info(),
+                    authority: ctx.accounts.user_key.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.token_program.clone();
+                let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+                token::approve(cpi_ctx, u64::MAX)?;
+            }
+        }
+
+        // Update subscription data
+        subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
+        subscr.merchant_token = *ctx.accounts.merchant_token.to_account_info().key;
+        subscr.merchant_approval = *ctx.accounts.merchant_approval.to_account_info().key;
+        subscr.manager_key = *ctx.accounts.manager_key.to_account_info().key;
+        subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
+        subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
+        subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
+        subscr.swap_account = swap_account;
+        subscr.rebill_max = inp_rebill_max;
+        subscr.next_rebill = inp_next_rebill;
+        subscr.max_delay = max_delay;
+        subscr.not_valid_before = inp_not_valid_before;
+        subscr.not_valid_after = inp_not_valid_after;
+        subscr.period = inp_period;
+        subscr.budget = inp_budget;
+        subscr.active = inp_active;
+        subscr.swap = inp_swap;
+
+        msg!("atellix-log");
+        emit!(SubscrEvent {
+            event_hash: 298296161986799263364555576740275705662, // solana/program/token-agent/update_subscription
+            slot: clock.slot,
+            subscr_data: subscr.key(),
+            subscr_uuid: subscr.subscr_uuid,
+            rebill_uuid: 0,
+            rebill_event: 0,
+            amount: 0,
+            next_rebill: inp_next_rebill,
+            swap: inp_swap,
+        });
+
         Ok(())
     }
 
@@ -491,8 +631,8 @@ mod token_agent {
         )?;
 
         // Verify merchant's associated token
-        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
-        let asc_token: Pubkey = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
+        let asc_token: Pubkey = Pubkey::from_str(ASC_TOKEN).unwrap();
         let derived_merchant_key = Pubkey::create_program_address(
             &[
                 &ctx.accounts.merchant_key.to_account_info().key.to_bytes(),
@@ -686,6 +826,7 @@ mod token_agent {
             subscr_data: subscr.key(),
             subscr_uuid: subscr.subscr_uuid,
             rebill_uuid: inp_rebill_uuid,
+            rebill_event: subscr.rebill_events,
             amount: inp_amount,
             next_rebill: inp_next_rebill,
             swap: subscr.swap,
@@ -693,6 +834,78 @@ mod token_agent {
 
         Ok(())
     }
+
+    // Fund an associated token account
+    pub fn fund_token(ctx: Context<FundToken>, inp_nonce: u8) -> ProgramResult {
+        // Accounts
+        let av = ctx.remaining_accounts;
+        let funding_account = av.get(0).unwrap();
+        let token_mint = av.get(1).unwrap();
+        let token_owner = av.get(2).unwrap();
+        let token_account = av.get(3).unwrap();
+        let token_program = av.get(4).unwrap();
+        let sys_program = av.get(5).unwrap();
+        let system_rent = av.get(6).unwrap();
+
+        // Verify merchant associated token
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
+        let asc_token: Pubkey = Pubkey::from_str(ASC_TOKEN).unwrap();
+        let derived_key = Pubkey::create_program_address(
+            &[
+                &token_owner.key.to_bytes(),
+                &spl_token.to_bytes(),
+                &token_mint.key.to_bytes(),
+                &[inp_nonce]
+            ],
+            &asc_token
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        if derived_key != *token_account.key {
+            msg!("Invalid token account");
+            return Err(ErrorCode::InvalidDerivedAccount.into());
+        }
+
+        if spl_token != *token_program.key {
+            msg!("Invalid token program id");
+            return Err(ErrorCode::InvalidProgramId.into());
+        }
+
+        if asc_token != *ctx.accounts.asc_token_account.to_account_info().key {
+            msg!("Invalid associated token program id");
+            return Err(ErrorCode::InvalidProgramId.into());
+        }
+
+        // Fund associated token account
+        let instr = Instruction {
+            program_id: asc_token,
+            accounts: vec![
+                AccountMeta::new(*funding_account.key, true),
+                AccountMeta::new(*token_account.key, false),
+                AccountMeta::new_readonly(*token_owner.key, false),
+                AccountMeta::new_readonly(*token_mint.key, false),
+                AccountMeta::new_readonly(solana_program::system_program::id(), false),
+                AccountMeta::new_readonly(spl_token, false),
+                AccountMeta::new_readonly(sysvar::rent::id(), false),
+            ],
+            data: vec![],
+        };
+        invoke(
+            &instr,
+            &[
+                funding_account.clone(),
+                token_account.clone(),
+                token_owner.clone(),
+                token_mint.clone(),
+                sys_program.clone(),
+                token_program.clone(),
+                system_rent.clone(),
+            ]
+        )?;
+        Ok(())
+    }
+
+/*    pub fn merchant_payment(ctx: Context<MerchantPayment>) -> ProgramResult {
+        Ok(())
+    }*/
 
     pub fn create_allowance(ctx: Context<CreateAllowance>,
         link_token: bool,
@@ -724,7 +937,7 @@ mod token_agent {
         }
 
         // Verfiy allowance program derived address
-        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
         let funder_key = ctx.remaining_accounts.get(0).unwrap();
         let allowance_data = ctx.remaining_accounts.get(1).unwrap();
         let sys_program = ctx.remaining_accounts.get(2).unwrap();
@@ -846,7 +1059,7 @@ mod token_agent {
         }
 
         // Verfiy allowance program derived address
-        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
         let derived_allowance_key = Pubkey::create_program_address(
             &[
                 &ctx.accounts.user_key.to_account_info().key.to_bytes(),
@@ -923,7 +1136,7 @@ mod token_agent {
         inp_amount: u64,
     ) -> ProgramResult {
         // Verfiy allowance program derived address
-        let spl_token: Pubkey = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
         let derived_allowance_key = Pubkey::create_program_address(
             &[
                 &ctx.accounts.user_key.to_account_info().key.to_bytes(),
@@ -1032,6 +1245,29 @@ pub struct CreateSubscr<'info> {
     pub net_rbac: AccountInfo<'info>,
     pub net_root: AccountInfo<'info>,
     pub root_key: AccountInfo<'info>,
+    pub merchant_key: AccountInfo<'info>,
+    #[account(mut)]
+    pub merchant_approval: Account<'info, MerchantApproval>,
+    #[account(mut)]
+    pub merchant_token: AccountInfo<'info>,
+    pub manager_key: AccountInfo<'info>,
+    pub manager_approval: Account<'info, ManagerApproval>,
+    #[account(signer)]
+    pub user_key: AccountInfo<'info>,
+    pub user_agent: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
+    pub token_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub token_account: AccountInfo<'info>,
+    #[account(mut)]
+    pub fees_account: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateSubscr<'info> {
+    #[account(mut)]
+    pub subscr_data: ProgramAccount<'info, SubscrData>,
+    pub net_auth: AccountInfo<'info>,
     pub merchant_key: AccountInfo<'info>,
     #[account(mut)]
     pub merchant_approval: Account<'info, MerchantApproval>,
@@ -1202,6 +1438,7 @@ pub struct SubscrEvent {
     pub subscr_data: Pubkey,
     pub subscr_uuid: u128,
     pub rebill_uuid: u128,
+    pub rebill_event: u32,
     pub amount: u64,
     pub next_rebill: i64,
     pub swap: bool,
