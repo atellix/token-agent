@@ -569,9 +569,25 @@ mod token_agent {
         Ok(())
     }
 
-/*    pub fn update_manager() -> ProgramResult {
+    pub fn update_manager<'info>(ctx: Context<'_, '_, '_, 'info, UpdateManager<'info>>) -> ProgramResult {
+        let subscr = &mut ctx.accounts.subscr_data;
+        if subscr.manager_key != *ctx.accounts.manager_prev.to_account_info().key {
+            msg!("Invalid account: manager_prev does not match subscription");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
+        let acc_mgr_approve = &ctx.accounts.manager_approval.to_account_info();
+        verify_matching_accounts(&subscr.approval_program, &acc_mgr_approve.owner,
+            Some(String::from("Invalid manager approval owner"))
+        )?;
+        let mgr_approval = &ctx.accounts.manager_approval;
+        if !mgr_approval.active {
+            msg!("Inactive manager approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        subscr.manager_key = *ctx.accounts.manager_key.to_account_info().key;
+        subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
         Ok(())
-    } */
+    }
 
     pub fn process<'info>(ctx: Context<'_, '_, '_, 'info, ProcessSubscr<'info>>,
         inp_user_nonce: u8,
@@ -1284,6 +1300,16 @@ pub struct UpdateSubscr<'info> {
     pub token_account: AccountInfo<'info>,
     #[account(mut)]
     pub fees_account: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateManager<'info> {
+    #[account(mut)]
+    pub subscr_data: ProgramAccount<'info, SubscrData>,
+    #[account(signer)]
+    pub manager_prev: AccountInfo<'info>,
+    pub manager_key: AccountInfo<'info>,
+    pub manager_approval: Account<'info, ManagerApproval>,
 }
 
 #[derive(Accounts)]
