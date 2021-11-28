@@ -919,9 +919,125 @@ mod token_agent {
         Ok(())
     }
 
-/*    pub fn merchant_payment(ctx: Context<MerchantPayment>) -> ProgramResult {
+    pub fn merchant_payment<'info>(ctx: Context<'_, '_, '_, 'info, MerchantPayment<'info>>,
+        inp_merchant_nonce: u8,
+        inp_root_nonce: u8,
+        inp_net_nonce: u8,
+        inp_payment_uuid: u128,
+        inp_amount: u64,
+        inp_swap: bool,
+        inp_swap_root_nonce: u8,
+        inp_swap_inb_nonce: u8,
+        inp_swap_out_nonce: u8,
+    ) -> ProgramResult {
+        let clock = Clock::get()?;
+
+        // Verify merchant's associated token
+        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
+        let asc_token: Pubkey = Pubkey::from_str(ASC_TOKEN).unwrap();
+        let derived_merchant_key = Pubkey::create_program_address(
+            &[
+                &ctx.accounts.merchant_key.to_account_info().key.to_bytes(),
+                &spl_token.to_bytes(),
+                &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                &[inp_merchant_nonce]
+            ],
+            &asc_token
+        ).map_err(|_| ErrorCode::InvalidNonce)?;
+        verify_matching_accounts(&derived_merchant_key, ctx.accounts.merchant_token.to_account_info().key,
+            Some(String::from("Invalid merchant token account"))
+        )?;
+
+        let mrch_approval = &ctx.accounts.merchant_approval;
+        if !mrch_approval.active {
+            msg!("Inactive merchant approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mrch_approval.merchant_key, &ctx.accounts.merchant_key.to_account_info().key,
+            Some(String::from("Merchant key does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.token_mint, &ctx.accounts.token_mint.to_account_info().key,
+            Some(String::from("Token mint does not match approval"))
+        )?;
+        verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
+            Some(String::from("Fees account does not match approval"))
+        )?;
+
+        if inp_amount > 0 {
+            // Swap if requested
+            if inp_swap {
+                //msg!("Atellix: Attempt swap");
+                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                let sw_accounts = Swap {
+                    root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                    auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
+                    swap_user: ctx.remaining_accounts.get(4).unwrap().clone(),      // User Agent PDA (signer)
+                    swap_data: ctx.remaining_accounts.get(5).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    inb_token_src: acc_swap_token.clone(),
+                    inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
+                    out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
+                    out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
+                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // User Payment Token
+                    fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                };
+                let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+                let signer = &[&seeds[..]];
+                let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, signer);
+                if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
+                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
+                }
+                swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
+            }
+
+            // Calculate fees
+            let mut amount: u64 = inp_amount;
+            if mrch_approval.fees_bps > 0 {
+                let f1: u128 = (amount as u128) << 64;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let fees: u64 = (f3 >> 64) as u64;
+                if fees > 0 {
+                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    let cpi_accounts = Transfer {
+                        from: ctx.accounts.token_account.to_account_info(),
+                        to: ctx.accounts.fees_account.to_account_info(),
+                        authority: ctx.accounts.user_key.to_account_info(),
+                    };
+                    let cpi_program = ctx.accounts.token_program.clone();
+                    let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+                    token::transfer(cpi_ctx, fees)?;
+                }
+                msg!("Atellix: Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
+            }
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.token_account.to_account_info(),
+                to: ctx.accounts.merchant_token.to_account_info(),
+                authority: ctx.accounts.user_key.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+            token::transfer(cpi_ctx, amount)?;
+
+            // Record merchant revenue
+            let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+            let signer = &[&seeds[..]];
+            let na_accounts = RecordRevenue {
+                root_data: ctx.accounts.net_root.clone(),
+                auth_data: ctx.accounts.net_rbac.clone(),
+                revenue_admin: ctx.accounts.root_key.clone(),
+                merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
+            };
+            let na_program = ctx.accounts.net_auth.clone();
+            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
+            //msg!("Atellix: Attempt to record revenue");
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
+        }
+
         Ok(())
-    }*/
+    }
 
     pub fn create_allowance(ctx: Context<CreateAllowance>,
         link_token: bool,
@@ -1329,6 +1445,28 @@ pub struct ProcessSubscr<'info> {
     pub manager_key: AccountInfo<'info>,
     pub manager_approval: Account<'info, ManagerApproval>,
     pub user_agent: AccountInfo<'info>,
+    pub token_program: AccountInfo<'info>,
+    pub token_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub token_account: AccountInfo<'info>,
+    #[account(mut)]
+    pub fees_account: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct MerchantPayment<'info> {
+    #[account(mut)]
+    pub net_auth: AccountInfo<'info>,
+    pub net_rbac: AccountInfo<'info>,
+    pub net_root: AccountInfo<'info>,
+    pub root_key: AccountInfo<'info>,
+    pub merchant_key: AccountInfo<'info>,
+    #[account(mut)]
+    pub merchant_approval: Account<'info, MerchantApproval>,
+    #[account(mut)]
+    pub merchant_token: AccountInfo<'info>,
+    #[account(signer)]
+    pub user_key: AccountInfo<'info>,
     pub token_program: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
