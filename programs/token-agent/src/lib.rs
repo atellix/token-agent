@@ -16,7 +16,7 @@ use solana_program::{
 use net_authority::{ cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
 
-declare_id!("3dPQNSLuCSGQEfufKD4Zc7o3vWpqPj88cPu5cxjHBkgH");
+declare_id!("2Pa6oFDaawsBjPjyNwwHGAL51VnfRhDe6T7Jg9EmWtBr");
 
 pub const SPL_TOKEN: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 pub const ASC_TOKEN: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
