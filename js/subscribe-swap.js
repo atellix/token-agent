@@ -39,7 +39,7 @@ function importSecretKey(keyStr) {
 async function main() {
     var ndjs
     try {
-        ndjs = await fs.readFile('/Users/mfrager/Build/solana/net-authority/js/net.json')
+        ndjs = await fs.readFile('../../data/net.json')
     } catch (error) {
         console.error('File Error: ', error)
     }
@@ -138,7 +138,7 @@ async function main() {
 
     var spjs
     try {
-        spjs = await fs.readFile('/Users/mfrager/Build/solana/swap-contract/js/swap.json')
+        spjs = await fs.readFile('../../data/swap.json')
     } catch (error) {
         console.error('File Error: ', error)
     }
@@ -146,7 +146,7 @@ async function main() {
 
     var djs
     try {
-        djs = await fs.readFile('/Users/mfrager/Build/solana/swap-contract/js/json/data-usdv-wsol.json')
+        djs = await fs.readFile('../../data/swap-usdv-wsol.json')
     } catch (error) {
         console.error('File Error: ', error)
     }
@@ -166,10 +166,8 @@ async function main() {
     const tokData2 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint2)
 
     const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
-    const userToken2 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint2)
 
     console.log('User Token 1: ' + userToken1.pubkey)
-    console.log('User Token 2: ' + userToken2.pubkey)
     console.log('Payment Token: ' + tokenAccount.toString())
 
     console.log('Subscribe Swap: ' + swapSpec.swapData)
