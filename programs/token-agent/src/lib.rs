@@ -1036,6 +1036,15 @@ mod token_agent {
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }
 
+        msg!("atellix-log");
+        emit!(PaymentEvent {
+            event_hash: 43781034894216267743388154650854733336, // solana/program/token-agent/merchant_payment
+            slot: clock.slot,
+            payment_uuid: inp_payment_uuid,
+            amount: inp_amount,
+            swap: inp_swap,
+        });
+
         Ok(())
     }
 
@@ -1455,7 +1464,6 @@ pub struct ProcessSubscr<'info> {
 
 #[derive(Accounts)]
 pub struct MerchantPayment<'info> {
-    #[account(mut)]
     pub net_auth: AccountInfo<'info>,
     pub net_rbac: AccountInfo<'info>,
     pub net_root: AccountInfo<'info>,
@@ -1605,6 +1613,15 @@ pub struct SubscrEvent {
     pub rebill_event: u32,
     pub amount: u64,
     pub next_rebill: i64,
+    pub swap: bool,
+}
+
+#[event]
+pub struct PaymentEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub payment_uuid: u128,
+    pub amount: u64,
     pub swap: bool,
 }
 
