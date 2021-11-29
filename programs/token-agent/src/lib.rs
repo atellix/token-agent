@@ -1010,7 +1010,7 @@ mod token_agent {
                     let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
                     token::transfer(cpi_ctx, fees)?;
                 }
-                msg!("Atellix: Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
+                //msg!("Atellix: Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
             }
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
