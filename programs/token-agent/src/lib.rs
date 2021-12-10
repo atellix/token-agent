@@ -1543,7 +1543,6 @@ pub struct SubscrData {
     pub token_mint: Pubkey,             // The token mint to pay for the subscription
     pub token_account: Pubkey,          // The token account to pay for the subscription
     pub swap_account: Pubkey,           // The token account to swap from if using a different mint for payments
-    pub rebill_data: Pubkey,            // The rebill data account to track subscription rebills and prevent duplicates
     // Subscription details below
     pub rebill_events: u32,             // Count of rebill events
     pub rebill_max: u32,                // Maximum number of times to rebill (0 = unlimited)
@@ -1573,7 +1572,6 @@ impl Default for SubscrData {
             token_mint: Pubkey::default(),
             token_account: Pubkey::default(),
             swap_account: Pubkey::default(),
-            rebill_data: Pubkey::default(),
             rebill_events: 0,
             rebill_max: 0,
             next_rebill: 0,
