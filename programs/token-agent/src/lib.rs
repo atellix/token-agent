@@ -383,18 +383,38 @@ mod token_agent {
         let ts = clock.unix_timestamp;
         let subscr = &mut ctx.accounts.subscr_data;
 
+        // Verify user key is the same
+        verify_matching_accounts(&subscr.user_key, &ctx.accounts.user_key.to_account_info().key,
+            Some(String::from("User key does not match"))
+        )?;
+
+        // Deactivate if requested by user
+        if !inp_active {
+            subscr.active = false;
+            msg!("atellix-log");
+            emit!(SubscrEvent {
+                event_hash: 163361025719893016519135760137561968517, // solana/program/token-agent/update_subscription/cancel
+                slot: clock.slot,
+                subscr_data: subscr.key(),
+                subscr_uuid: subscr.subscr_uuid,
+                rebill_uuid: 0,
+                rebill_event: 0,
+                amount: 0,
+                next_rebill: -1,
+                swap: subscr.swap,
+            });
+            return Ok(());
+        }
+
+        // Verify user agent is the same
+        verify_matching_accounts(&subscr.user_agent, &ctx.accounts.user_agent.to_account_info().key,
+            Some(String::from("User agent does not match"))
+        )?;
+
         // Verify network authority is the same
         let netauth = &ctx.accounts.net_auth.to_account_info().key;
         verify_matching_accounts(netauth, &subscr.approval_program,
             Some(String::from("Approval program does not match"))
-        )?;
-
-        // Verify user key and user agent are the same
-        verify_matching_accounts(&subscr.user_key, &ctx.accounts.user_key.to_account_info().key,
-            Some(String::from("User key does not match"))
-        )?;
-        verify_matching_accounts(&subscr.user_agent, &ctx.accounts.user_agent.to_account_info().key,
-            Some(String::from("User agent does not match"))
         )?;
 
         // Verify network authority accounts
@@ -535,6 +555,7 @@ mod token_agent {
         }
 
         // Update subscription data
+        subscr.active = true;
         subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
         subscr.merchant_token = *ctx.accounts.merchant_token.to_account_info().key;
         subscr.merchant_approval = *ctx.accounts.merchant_approval.to_account_info().key;
@@ -550,7 +571,6 @@ mod token_agent {
         subscr.not_valid_after = inp_not_valid_after;
         subscr.period = inp_period;
         subscr.budget = inp_budget;
-        subscr.active = inp_active;
         subscr.swap = inp_swap;
 
         msg!("atellix-log");
@@ -584,8 +604,51 @@ mod token_agent {
             msg!("Inactive manager approval");
             return Err(ErrorCode::NotApproved.into());
         }
+        verify_matching_accounts(&mgr_approval.manager_key, &ctx.accounts.manager_key.to_account_info().key,
+            Some(String::from("Manager key does not match approval"))
+        )?;
+
         subscr.manager_key = *ctx.accounts.manager_key.to_account_info().key;
         subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
+        Ok(())
+    }
+
+    pub fn manager_cancel<'info>(ctx: Context<'_, '_, '_, 'info, ManagerCancel<'info>>) -> ProgramResult {
+        let clock = Clock::get()?;
+
+        let subscr = &mut ctx.accounts.subscr_data;
+        if subscr.manager_key != *ctx.accounts.manager_key.to_account_info().key {
+            msg!("Invalid account: manager_key does not match subscription");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
+        let acc_mgr_approve = &ctx.accounts.manager_approval.to_account_info();
+        verify_matching_accounts(&subscr.approval_program, &acc_mgr_approve.owner,
+            Some(String::from("Invalid manager approval owner"))
+        )?;
+        let mgr_approval = &ctx.accounts.manager_approval;
+        if !mgr_approval.active {
+            msg!("Inactive manager approval");
+            return Err(ErrorCode::NotApproved.into());
+        }
+        verify_matching_accounts(&mgr_approval.manager_key, &ctx.accounts.manager_key.to_account_info().key,
+            Some(String::from("Manager key does not match approval"))
+        )?;
+
+        subscr.active = false;
+
+        msg!("atellix-log");
+        emit!(SubscrEvent {
+            event_hash: 14511983483732720963723889670203659368, // solana/program/token-agent/manager_cancel
+            slot: clock.slot,
+            subscr_data: subscr.key(),
+            subscr_uuid: subscr.subscr_uuid,
+            rebill_uuid: 0,
+            rebill_event: 0,
+            amount: 0,
+            next_rebill: -1,
+            swap: subscr.swap,
+        });
+
         Ok(())
     }
 
@@ -1433,6 +1496,15 @@ pub struct UpdateManager<'info> {
     pub subscr_data: ProgramAccount<'info, SubscrData>,
     #[account(signer)]
     pub manager_prev: AccountInfo<'info>,
+    pub manager_key: AccountInfo<'info>,
+    pub manager_approval: Account<'info, ManagerApproval>,
+}
+
+#[derive(Accounts)]
+pub struct ManagerCancel<'info> {
+    #[account(mut)]
+    pub subscr_data: ProgramAccount<'info, SubscrData>,
+    #[account(signer)]
     pub manager_key: AccountInfo<'info>,
     pub manager_approval: Account<'info, ManagerApproval>,
 }
