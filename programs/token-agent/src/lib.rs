@@ -16,7 +16,7 @@ use solana_program::{
 use net_authority::{ cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
 
-declare_id!("2Pa6oFDaawsBjPjyNwwHGAL51VnfRhDe6T7Jg9EmWtBr");
+declare_id!("EryiT8o8tLJBnU787cq51xvpKYNfDGm3qKAtBq4ueoFV");
 
 pub const SPL_TOKEN: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 pub const ASC_TOKEN: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
@@ -90,6 +90,7 @@ mod token_agent {
         inp_swap_root_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
+        inp_swap_dst_nonce: u8,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
@@ -220,7 +221,7 @@ mod token_agent {
         }
 
         // Setup up token delegate if needed
-        if inp_link_token {
+        if !inp_swap && inp_link_token {
             let cpi_accounts = Approve {
                 to: ctx.accounts.token_account.to_account_info(),
                 delegate: ctx.accounts.user_agent.to_account_info(),
@@ -249,6 +250,22 @@ mod token_agent {
                     let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
                     token::approve(cpi_ctx, u64::MAX)?;
                 }
+
+                // Verify token agent's swap destination associated token
+                let derived_swap_key = Pubkey::create_program_address(
+                    &[
+                        &ctx.accounts.root_key.to_account_info().key.to_bytes(),
+                        &spl_token.to_bytes(),
+                        &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                        &[inp_swap_dst_nonce]
+                    ],
+                    &asc_token
+                ).map_err(|_| ErrorCode::InvalidNonce)?;
+                if derived_swap_key != *ctx.accounts.token_account.to_account_info().key {
+                    msg!("Invalid swap destination token account");
+                    return Err(ErrorCode::InvalidDerivedAccount.into());
+                }
+
                 //msg!("Atellix: Attempt swap");
                 swap_account = acc_swap_token.key();
                 let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
@@ -262,7 +279,7 @@ mod token_agent {
                     inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
                     out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
                     out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // User Payment Token
+                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token agent swap destination
                     fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
@@ -274,11 +291,16 @@ mod token_agent {
             }
 
             // Transfer tokens
-            let seeds = &[
-                ctx.accounts.user_key.to_account_info().key.as_ref(),
-                &[inp_user_nonce],
-            ];
-            let signer = &[&seeds[..]];
+            let user_pda_seeds = &[ctx.accounts.user_key.to_account_info().key.as_ref(), &[inp_user_nonce]];
+            let user_pda_signer = &[&user_pda_seeds[..]];
+            let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+            let root_pda_signer = &[&root_pda_seeds[..]];
+            let mut signer = user_pda_signer;
+            let mut token_auth = ctx.accounts.user_agent.to_account_info();
+            if inp_swap {
+                signer = root_pda_signer;
+                token_auth = ctx.accounts.root_key.to_account_info();
+            }
 
             // Calculate fees
             let mut amount: u64 = inp_initial_amount;
@@ -292,25 +314,24 @@ mod token_agent {
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
-                        authority: ctx.accounts.user_agent.to_account_info(),
+                        authority: token_auth.clone(),
                     };
                     let cpi_program = ctx.accounts.token_program.clone();
                     let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
                     token::transfer(cpi_ctx, fees)?;
                 }
             }
+
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
                 to: ctx.accounts.merchant_token.to_account_info(),
-                authority: ctx.accounts.user_agent.to_account_info(),
+                authority: token_auth.clone(),
             };
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
             token::transfer(cpi_ctx, amount)?;
 
             // Record merchant revenue
-            let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
-            let signer = &[&seeds[..]];
             let na_accounts = RecordRevenue {
                 root_data: ctx.accounts.net_root.clone(),
                 auth_data: ctx.accounts.net_rbac.clone(),
@@ -318,7 +339,7 @@ mod token_agent {
                 merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
             };
             let na_program = ctx.accounts.net_auth.clone();
-            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
+            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }
@@ -830,7 +851,7 @@ mod token_agent {
                     inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
                     out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
                     out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // User Payment Token
+                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
                     fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
@@ -843,11 +864,16 @@ mod token_agent {
                 swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
             }
 
-            let seeds = &[
-                subscr.user_key.as_ref(),
-                &[inp_user_nonce],
-            ];
-            let signer = &[&seeds[..]];
+            let user_pda_seeds = &[subscr.user_key.as_ref(), &[inp_user_nonce]];
+            let user_pda_signer = &[&user_pda_seeds[..]];
+            let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+            let root_pda_signer = &[&root_pda_seeds[..]];
+            let mut signer = user_pda_signer;
+            let mut token_auth = ctx.accounts.user_agent.to_account_info();
+            if subscr.swap {
+                signer = root_pda_signer;
+                token_auth = ctx.accounts.root_key.to_account_info();
+            }
 
             // Calculate fees
             let mut amount: u64 = inp_amount;
@@ -861,10 +887,11 @@ mod token_agent {
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
-                        authority: ctx.accounts.user_agent.to_account_info(),
+                        authority: token_auth.clone(),
                     };
                     let cpi_program = ctx.accounts.token_program.clone();
                     let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+                    msg!("Atellix: Transfer Merchant Fees");
                     token::transfer(cpi_ctx, fees)?;
                 }
                 //msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
@@ -872,15 +899,13 @@ mod token_agent {
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
                 to: ctx.accounts.merchant_token.to_account_info(),
-                authority: ctx.accounts.user_agent.to_account_info(),
+                authority: token_auth.clone(),
             };
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
             token::transfer(cpi_ctx, amount)?;
 
             // Record merchant revenue
-            let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
-            let signer = &[&seeds[..]];
             let na_accounts = RecordRevenue {
                 root_data: ctx.accounts.net_root.clone(),
                 auth_data: ctx.accounts.net_rbac.clone(),
@@ -888,7 +913,7 @@ mod token_agent {
                 merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
             };
             let na_program = ctx.accounts.net_auth.clone();
-            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
+            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }

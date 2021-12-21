@@ -39,7 +39,7 @@ function importSecretKey(keyStr) {
 async function main() {
     var ndjs
     try {
-        ndjs = await fs.readFile('/Users/mfrager/Build/solana/net-authority/js/net.json')
+        ndjs = await fs.readFile('../../data/net.json')
     } catch (error) {
         console.error('File Error: ', error)
     }
@@ -162,6 +162,7 @@ async function main() {
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
+        0,                                              // inp_swap_dst_nonce
         {
             accounts: {
                 subscrData: subscrData.publicKey,
@@ -184,7 +185,7 @@ async function main() {
         }
     )
 
-    if (true) {
+    if (false) {
         console.log('Process 1')
 
         console.log({

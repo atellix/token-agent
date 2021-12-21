@@ -47,12 +47,13 @@ async function main() {
     //console.log(netData)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
-    const walletToken = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
-    const tokenAccount = new PublicKey(walletToken.pubkey)
 
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
+
+    const agentToken = await associatedTokenAddress(new PublicKey(rootKey.pubkey), tokenMint)
+    const tokenAccount = new PublicKey(agentToken.pubkey)
 
     const subscrId = uuidv4()
     const subscrData = anchor.web3.Keypair.generate()
@@ -196,6 +197,7 @@ async function main() {
         swapRootData.nonce,                             // inp_swap_root_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
+        agentToken.nonce,                               // inp_swap_dst_nonce
         {
             accounts: {
                 subscrData: subscrData.publicKey,
