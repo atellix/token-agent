@@ -165,6 +165,7 @@ async function main() {
         0,                                              // inp_swap_dst_nonce
         {
             accounts: {
+                //subscrData: new PublicKey('Fxg4sFxmiWFPaxS7Xtgnk4J83grzcky9ZpMd6GyutEPd'),
                 subscrData: subscrData.publicKey,
                 netAuth: netAuth,
                 netRoot: new PublicKey(netRoot.pubkey),

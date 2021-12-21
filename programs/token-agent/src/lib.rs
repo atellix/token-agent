@@ -1,6 +1,7 @@
 //use uuid::Uuid;
 use std::{ io::Cursor, string::String, result::Result as FnResult, str::FromStr };
 //use bytemuck::{ Pod, Zeroable };
+use arrayref::array_ref;
 use num_enum::TryFromPrimitive;
 use chrono::{ NaiveDateTime, Datelike };
 use anchor_lang::prelude::*;
@@ -61,6 +62,11 @@ fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<Str
 #[inline]
 fn store_struct<T: AccountSerialize>(obj: &T, acc: &AccountInfo) -> FnResult<(), ProgramError> {
     let mut data = acc.try_borrow_mut_data()?;
+    let disc_bytes = array_ref![data, 0, 8];
+    if disc_bytes != &[0; 8] {
+        msg!("Account already initialized");
+        return Err(ErrorCode::InvalidAccount.into());
+    }
     let dst: &mut [u8] = &mut data;
     let mut crs = Cursor::new(dst);
     obj.try_serialize(&mut crs)
@@ -1253,6 +1259,11 @@ mod token_agent {
         }
 
         let mut approval_data = &mut allowance_data.try_borrow_mut_data()?;
+        let disc_bytes = array_ref![approval_data, 0, 8];
+        if disc_bytes != &[0; 8] {
+            msg!("Account already initialized");
+            return Err(ErrorCode::InvalidAccount.into());
+        }
         let approval_dst: &mut [u8] = &mut approval_data;
         let mut approval_crs = std::io::Cursor::new(approval_dst);
         tka.try_serialize(&mut approval_crs)?;
