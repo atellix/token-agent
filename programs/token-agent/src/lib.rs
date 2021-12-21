@@ -370,7 +370,7 @@ mod token_agent {
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.subscr_uuid = inp_subscr_uuid;
-        subscr.rebill_uuid = inp_initial_tx_uuid;
+        subscr.tx_uuid = inp_initial_tx_uuid;
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.active = true;
@@ -383,7 +383,7 @@ mod token_agent {
             slot: clock.slot,
             subscr_data: ctx.accounts.subscr_data.key(),
             subscr_uuid: inp_subscr_uuid,
-            rebill_uuid: inp_initial_tx_uuid,
+            tx_uuid: inp_initial_tx_uuid,
             rebill_event: 0,
             amount: inp_initial_amount,
             next_rebill: inp_next_rebill,
@@ -394,9 +394,14 @@ mod token_agent {
     }
 
     pub fn update_subscription<'info>(ctx: Context<'_, '_, '_, 'info, UpdateSubscr<'info>>,
-        inp_merchant_nonce: u8,
-        inp_link_token: bool,
         inp_active: bool,
+        inp_link_token: bool,
+        inp_amount: u64,
+        inp_tx_uuid: u128,
+        inp_user_nonce: u8,
+        inp_merchant_nonce: u8,
+        inp_root_nonce: u8,
+        inp_net_nonce: u8,
         inp_period: u8,
         inp_budget: u64,
         inp_next_rebill: i64,
@@ -405,6 +410,10 @@ mod token_agent {
         inp_not_valid_after: i64,
         inp_swap: bool,
         inp_swap_link: bool,
+        inp_swap_root_nonce: u8,
+        inp_swap_inb_nonce: u8,
+        inp_swap_out_nonce: u8,
+        inp_swap_dst_nonce: u8,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
@@ -424,7 +433,7 @@ mod token_agent {
                 slot: clock.slot,
                 subscr_data: subscr.key(),
                 subscr_uuid: subscr.subscr_uuid,
-                rebill_uuid: 0,
+                tx_uuid: 0,
                 rebill_event: 0,
                 amount: 0,
                 next_rebill: -1,
@@ -551,7 +560,7 @@ mod token_agent {
         }
 
         // Setup up token delegate if needed
-        if inp_link_token {
+        if !inp_swap && inp_link_token {
             let cpi_accounts = Approve {
                 to: ctx.accounts.token_account.to_account_info(),
                 delegate: ctx.accounts.user_agent.to_account_info(),
@@ -581,6 +590,100 @@ mod token_agent {
             }
         }
 
+        if inp_amount > 0 {
+            // Swap if requested
+            if inp_swap {
+                //msg!("Atellix: Attempt swap");
+                // Verify token agent's swap destination associated token
+                let derived_swap_key = Pubkey::create_program_address(
+                    &[
+                        &ctx.accounts.root_key.to_account_info().key.to_bytes(),
+                        &spl_token.to_bytes(),
+                        &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                        &[inp_swap_dst_nonce]
+                    ],
+                    &asc_token
+                ).map_err(|_| ErrorCode::InvalidNonce)?;
+                if derived_swap_key != *ctx.accounts.token_account.to_account_info().key {
+                    msg!("Invalid swap destination token account");
+                    return Err(ErrorCode::InvalidDerivedAccount.into());
+                }
+                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                let sw_accounts = Swap {
+                    root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                    auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
+                    swap_user: ctx.remaining_accounts.get(4).unwrap().clone(),      // User Agent PDA (signer)
+                    swap_data: ctx.remaining_accounts.get(5).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    inb_token_src: acc_swap_token.clone(),
+                    inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
+                    out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
+                    out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
+                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
+                    fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                };
+                let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
+                if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
+                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
+                }
+                swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
+            }
+
+            let user_pda_seeds = &[subscr.user_key.as_ref(), &[inp_user_nonce]];
+            let user_pda_signer = &[&user_pda_seeds[..]];
+            let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+            let root_pda_signer = &[&root_pda_seeds[..]];
+            let mut signer = user_pda_signer;
+            let mut token_auth = ctx.accounts.user_agent.to_account_info();
+            if inp_swap {
+                signer = root_pda_signer;
+                token_auth = ctx.accounts.root_key.to_account_info();
+            }
+
+            // Calculate fees
+            let mut amount: u64 = inp_amount;
+            if mrch_approval.fees_bps > 0 {
+                let f1: u128 = (amount as u128) << 64;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let fees: u64 = (f3 >> 64) as u64;
+                if fees > 0 {
+                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    let cpi_accounts = Transfer {
+                        from: ctx.accounts.token_account.to_account_info(),
+                        to: ctx.accounts.fees_account.to_account_info(),
+                        authority: token_auth.clone(),
+                    };
+                    let cpi_program = ctx.accounts.token_program.clone();
+                    let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+                    token::transfer(cpi_ctx, fees)?;
+                }
+                //msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
+            }
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.token_account.to_account_info(),
+                to: ctx.accounts.merchant_token.to_account_info(),
+                authority: token_auth.clone(),
+            };
+            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+            token::transfer(cpi_ctx, amount)?;
+
+            // Record merchant revenue
+            let na_accounts = RecordRevenue {
+                root_data: ctx.accounts.net_root.clone(),
+                auth_data: ctx.accounts.net_rbac.clone(),
+                revenue_admin: ctx.accounts.root_key.clone(),
+                merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
+            };
+            let na_program = ctx.accounts.net_auth.clone();
+            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
+            //msg!("Atellix: Attempt to record revenue");
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
+        }
+
         // Update subscription data
         subscr.active = true;
         subscr.merchant_key = *ctx.accounts.merchant_key.to_account_info().key;
@@ -599,6 +702,9 @@ mod token_agent {
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.swap = inp_swap;
+        if inp_tx_uuid != 0 {
+            subscr.tx_uuid = inp_tx_uuid;
+        }
 
         msg!("atellix-log");
         emit!(SubscrEvent {
@@ -606,9 +712,9 @@ mod token_agent {
             slot: clock.slot,
             subscr_data: subscr.key(),
             subscr_uuid: subscr.subscr_uuid,
-            rebill_uuid: 0,
+            tx_uuid: inp_tx_uuid,
             rebill_event: 0,
-            amount: 0,
+            amount: inp_amount,
             next_rebill: inp_next_rebill,
             swap: inp_swap,
         });
@@ -669,7 +775,7 @@ mod token_agent {
             slot: clock.slot,
             subscr_data: subscr.key(),
             subscr_uuid: subscr.subscr_uuid,
-            rebill_uuid: 0,
+            tx_uuid: 0,
             rebill_event: 0,
             amount: 0,
             next_rebill: -1,
@@ -897,7 +1003,6 @@ mod token_agent {
                     };
                     let cpi_program = ctx.accounts.token_program.clone();
                     let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-                    msg!("Atellix: Transfer Merchant Fees");
                     token::transfer(cpi_ctx, fees)?;
                 }
                 //msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
@@ -926,7 +1031,7 @@ mod token_agent {
 
         // Update parameters
         subscr.next_rebill = inp_next_rebill;
-        subscr.rebill_uuid = inp_rebill_uuid;
+        subscr.tx_uuid = inp_rebill_uuid;
         subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
 
         msg!("atellix-log");
@@ -935,7 +1040,7 @@ mod token_agent {
             slot: clock.slot,
             subscr_data: subscr.key(),
             subscr_uuid: subscr.subscr_uuid,
-            rebill_uuid: inp_rebill_uuid,
+            tx_uuid: inp_rebill_uuid,
             rebill_event: subscr.rebill_events,
             amount: inp_amount,
             next_rebill: inp_next_rebill,
@@ -1023,6 +1128,7 @@ mod token_agent {
         inp_swap_root_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
+        inp_swap_dst_nonce: u8,
     ) -> ProgramResult {
         let clock = Clock::get()?;
 
@@ -1061,6 +1167,20 @@ mod token_agent {
             // Swap if requested
             if inp_swap {
                 //msg!("Atellix: Attempt swap");
+                // Verify token agent's swap destination associated token
+                let derived_swap_key = Pubkey::create_program_address(
+                    &[
+                        &ctx.accounts.root_key.to_account_info().key.to_bytes(),
+                        &spl_token.to_bytes(),
+                        &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
+                        &[inp_swap_dst_nonce]
+                    ],
+                    &asc_token
+                ).map_err(|_| ErrorCode::InvalidNonce)?;
+                if derived_swap_key != *ctx.accounts.token_account.to_account_info().key {
+                    msg!("Invalid swap destination token account");
+                    return Err(ErrorCode::InvalidDerivedAccount.into());
+                }
                 let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
                 let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
                 let sw_accounts = Swap {
@@ -1073,17 +1193,23 @@ mod token_agent {
                     inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
                     out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
                     out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // User Payment Token
+                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
                     fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
-                let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
-                let signer = &[&seeds[..]];
-                let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, signer);
+                let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
                 if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
                     sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
                 }
                 swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
+            }
+
+            // Transfer tokens
+            let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
+            let root_pda_signer = &[&root_pda_seeds[..]];
+            let mut token_auth = ctx.accounts.user_key.to_account_info();
+            if inp_swap {
+                token_auth = ctx.accounts.root_key.to_account_info();
             }
 
             // Calculate fees
@@ -1098,10 +1224,15 @@ mod token_agent {
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
-                        authority: ctx.accounts.user_key.to_account_info(),
+                        authority: token_auth.clone(),
                     };
                     let cpi_program = ctx.accounts.token_program.clone();
-                    let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+                    let cpi_ctx;
+                    if inp_swap {
+                        cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                    } else {
+                        cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+                    }
                     token::transfer(cpi_ctx, fees)?;
                 }
                 //msg!("Atellix: Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
@@ -1109,15 +1240,18 @@ mod token_agent {
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
                 to: ctx.accounts.merchant_token.to_account_info(),
-                authority: ctx.accounts.user_key.to_account_info(),
+                authority: token_auth.clone(),
             };
             let cpi_program = ctx.accounts.token_program.clone();
-            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+            let cpi_ctx;
+            if inp_swap {
+                cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+            } else {
+                cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+            }
             token::transfer(cpi_ctx, amount)?;
 
             // Record merchant revenue
-            let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
-            let signer = &[&seeds[..]];
             let na_accounts = RecordRevenue {
                 root_data: ctx.accounts.net_root.clone(),
                 auth_data: ctx.accounts.net_rbac.clone(),
@@ -1125,7 +1259,7 @@ mod token_agent {
                 merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
             };
             let na_program = ctx.accounts.net_auth.clone();
-            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, signer);
+            let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
         }
@@ -1508,6 +1642,9 @@ pub struct UpdateSubscr<'info> {
     #[account(mut)]
     pub subscr_data: ProgramAccount<'info, SubscrData>,
     pub net_auth: AccountInfo<'info>,
+    pub net_rbac: AccountInfo<'info>,
+    pub net_root: AccountInfo<'info>,
+    pub root_key: AccountInfo<'info>,
     pub merchant_key: AccountInfo<'info>,
     #[account(mut)]
     pub merchant_approval: Account<'info, MerchantApproval>,
@@ -1659,7 +1796,7 @@ pub struct SubscrData {
     pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
     pub max_delay: i64,                 // The number of seconds after the start of the rebill period the manager can be delayed in attempting to rebill
     pub subscr_uuid: u128,              // Subscription UUID
-    pub rebill_uuid: u128,              // Last Rebill UUID
+    pub tx_uuid: u128,              // Last Rebill UUID
     pub period: u8,                     // Subscription rebill period
     pub budget: u64,                    // Subscription budget (maximum amount, not necessarily the amount that will be billed which could be less)
     pub active: bool,                   // Subscription is active
@@ -1687,7 +1824,7 @@ impl Default for SubscrData {
             not_valid_after: 0,
             max_delay: 0,
             subscr_uuid: 0,
-            rebill_uuid: 0,
+            tx_uuid: 0,
             period: 0,
             budget: 0,
             active: false,
@@ -1715,7 +1852,7 @@ pub struct SubscrEvent {
     pub slot: u64,
     pub subscr_data: Pubkey,
     pub subscr_uuid: u128,
-    pub rebill_uuid: u128,
+    pub tx_uuid: u128,
     pub rebill_event: u32,
     pub amount: u64,
     pub next_rebill: i64,
@@ -1733,7 +1870,7 @@ pub struct PaymentEvent {
 
 #[error]
 pub enum ErrorCode {
-    #[msg("Invalid subscription period")]
+    #[msg("Inactive subscription")]
     InactiveSubscription,
     #[msg("Invalid program id")]
     InvalidProgramId,
@@ -1760,8 +1897,6 @@ pub enum ErrorCode {
     #[msg("Expired")]
     Expired,
     #[msg("Maximum rebills reached")]
-    DuplicateRebill,
-    #[msg("Duplicate rebill")]
     MaxRebills,
     #[msg("Overflow")]
     Overflow,
