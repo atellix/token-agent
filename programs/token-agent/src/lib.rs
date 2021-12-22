@@ -19,6 +19,10 @@ use swap_contract::{ cpi::accounts::Swap };
 
 declare_id!("EryiT8o8tLJBnU787cq51xvpKYNfDGm3qKAtBq4ueoFV");
 
+pub const VERSION_MAJOR: u32 = 1;
+pub const VERSION_MINOR: u32 = 0;
+pub const VERSION_PATCH: u32 = 0;
+
 pub const SPL_TOKEN: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 pub const ASC_TOKEN: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 
