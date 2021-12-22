@@ -17,7 +17,10 @@ use solana_program::{
 use net_authority::{ cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
 
-declare_id!("EryiT8o8tLJBnU787cq51xvpKYNfDGm3qKAtBq4ueoFV");
+extern crate decode_account;
+use decode_account::parse_bpf_loader::{ parse_bpf_upgradeable_loader, BpfUpgradeableLoaderAccountType };
+
+declare_id!("8Hjncqi9Ssqgq2uwVNiTyavFViWwhRkuKxQgVWqKwyz1");
 
 pub const VERSION_MAJOR: u32 = 1;
 pub const VERSION_MINOR: u32 = 0;
@@ -49,6 +52,51 @@ pub fn get_period_string(ts: i64, period: SubscriptionPeriod) -> FnResult<String
         },
         SubscriptionPeriod::Yearly => Ok(dt.format("%Y").to_string()),
     }
+}
+
+fn verify_program_owner(program_id: &Pubkey, acc_prog: &AccountInfo, acc_pdat: &AccountInfo, acc_user: &AccountInfo) -> ProgramResult {
+    if *acc_prog.key != *program_id {
+        msg!("Program account is not this program");
+        return Err(ErrorCode::AccessDenied.into());
+    }
+    //msg!("Verified program account");
+    let data: &[u8] = &acc_prog.try_borrow_data()?;
+    let res = parse_bpf_upgradeable_loader(data);
+    if ! res.is_ok() {
+        msg!("Failed to decode program");
+        return Err(ErrorCode::AccessDenied.into());
+    }
+    let program_data = match res.unwrap() {
+        BpfUpgradeableLoaderAccountType::Program(info) => info.program_data,
+        _ => {
+            msg!("Invalid program account type");
+            return Err(ErrorCode::AccessDenied.into());
+        },
+    };
+    if acc_pdat.key.to_string() != program_data {
+        msg!("Program data address does not match");
+        return Err(ErrorCode::AccessDenied.into());
+    }
+    //msg!("Verified program data account");
+    let data2: &[u8] = &acc_pdat.try_borrow_data()?;
+    let res2 = parse_bpf_upgradeable_loader(data2);
+    if ! res2.is_ok() {
+        msg!("Failed to decode program data");
+        return Err(ErrorCode::AccessDenied.into());
+    }
+    let program_owner = match res2.unwrap() {
+        BpfUpgradeableLoaderAccountType::ProgramData(info) => info.authority.unwrap(),
+        _ => {
+            msg!("Invalid program data account type");
+            return Err(ErrorCode::AccessDenied.into());
+        },
+    };
+    if acc_user.key.to_string() != program_owner {
+        msg!("Root admin is not program owner");
+        return Err(ErrorCode::AccessDenied.into());
+    }
+    //msg!("Verified program owner");
+    Ok(())
 }
 
 fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<String>) -> ProgramResult {
@@ -1995,6 +2043,8 @@ pub enum ErrorCode {
     BudgetExceeded,
     #[msg("Allowance exceeded")]
     AllowanceExceeded,
+    #[msg("Access denied")]
+    AccessDenied,
     #[msg("Subscription not valid yet")]
     NotValidYet,
     #[msg("Expired")]

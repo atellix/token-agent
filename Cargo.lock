@@ -1384,6 +1384,7 @@ dependencies = [
  "arrayref",
  "bytemuck",
  "chrono",
+ "decode-account",
  "net-authority",
  "num_enum",
  "solana-program",
