@@ -1070,22 +1070,22 @@ mod token_agent {
                 let sw_accounts = Swap {
                     root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
                     auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    swap_user: ctx.remaining_accounts.get(4).unwrap().clone(),      // User Agent PDA (signer)
-                    swap_data: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    inb_info: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    swap_user: ctx.accounts.user_agent.to_account_info(),           // User Agent PDA (signer)
+                    swap_data: ctx.remaining_accounts.get(4).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(5).unwrap().clone(),
                     inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
-                    out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
+                    inb_token_dst: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    out_info: ctx.remaining_accounts.get(7).unwrap().clone(),
+                    out_token_src: ctx.remaining_accounts.get(8).unwrap().clone(),
                     out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
-                    fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
+                    fees_token: ctx.remaining_accounts.get(9).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
                 let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
                 let signer = &[&seeds[..]];
                 let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, signer);
-                if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
+                if ctx.remaining_accounts.len() > 10 { // Oracle Data Account (if needed)
+                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(10).unwrap().clone()]);
                 }
                 swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
             }
