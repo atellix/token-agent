@@ -1,4 +1,3 @@
-//use uuid::Uuid;
 use std::{ io::Cursor, string::String, result::Result as FnResult, str::FromStr };
 //use bytemuck::{ Pod, Zeroable };
 use arrayref::array_ref;
@@ -20,7 +19,7 @@ use swap_contract::{ cpi::accounts::Swap };
 extern crate decode_account;
 use decode_account::parse_bpf_loader::{ parse_bpf_upgradeable_loader, BpfUpgradeableLoaderAccountType };
 
-declare_id!("8Hjncqi9Ssqgq2uwVNiTyavFViWwhRkuKxQgVWqKwyz1");
+declare_id!("5PH4bMS32WTiSYDBAEXeNCpKNEcCj6PQ5PmKkH3zWRrv");
 
 pub const VERSION_MAJOR: u32 = 1;
 pub const VERSION_MINOR: u32 = 0;
@@ -203,20 +202,15 @@ mod token_agent {
     pub fn subscribe<'info>(ctx: Context<'_, '_, '_, 'info, CreateSubscr<'info>>,
         inp_link_token: bool,
         inp_initial_amount: u64,
-        inp_initial_tx_uuid: u128,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
         inp_net_nonce: u8,
-        inp_subscr_uuid: u128,
+        inp_subscr_id: u64,
         inp_period: u8,
         inp_budget: u64,
         inp_next_rebill: i64,
-        inp_rebill_max: u32,
-        inp_not_valid_before: i64,
-        inp_not_valid_after: i64,
         inp_swap: bool,
-        inp_swap_link: bool,
         inp_swap_root_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
@@ -276,7 +270,9 @@ mod token_agent {
             SubscriptionPeriod::Quarterly => (60 * 60 * 24 * 180),  // ~2 quarters
             SubscriptionPeriod::Yearly => (60 * 60 * 24 * 365 * 2), // ~2 years
         };
-        if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
+
+        // Moved to update to save space in transaction request
+        /*if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
             msg!("Invalid subscription start");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
@@ -289,19 +285,24 @@ mod token_agent {
                 msg!("Invalid timeframe");
                 return Err(ErrorCode::InvalidTimeframe.into());
             }
-        }
+        }*/
+
         if inp_next_rebill < 0 {
             msg!("Invalid negative next_rebill");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
-        if inp_not_valid_before > 0 && inp_next_rebill < inp_not_valid_before {
+
+        // Moved to update to save space in transaction request
+        /*if inp_not_valid_before > 0 && inp_next_rebill < inp_not_valid_before {
             msg!("Next rebill is before start");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         let mut timeframe_start: i64 = ts;
         if inp_not_valid_before > 0 {
             timeframe_start = inp_not_valid_before;
-        }
+        }*/
+
+        let timeframe_start: i64 = ts;
         let timeframe_end = timeframe_start.checked_add(max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
         if inp_next_rebill < timeframe_start || inp_next_rebill > timeframe_end {
             msg!("Next rebill not within timeframe");
@@ -370,7 +371,7 @@ mod token_agent {
                 let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
 
                 // Setup up token delegate if needed
-                if inp_swap_link {
+                if inp_link_token {
                     let cpi_accounts = Approve {
                         to: acc_swap_token.clone(),
                         delegate: ctx.accounts.user_agent.to_account_info(),
@@ -402,20 +403,20 @@ mod token_agent {
                 let sw_accounts = Swap {
                     root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
                     auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    swap_user: ctx.remaining_accounts.get(4).unwrap().clone(),
-                    swap_data: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    inb_info: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    swap_user: ctx.accounts.user_key.to_account_info(),
+                    swap_data: ctx.remaining_accounts.get(4).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(5).unwrap().clone(),
                     inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
-                    out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
+                    inb_token_dst: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    out_info: ctx.remaining_accounts.get(7).unwrap().clone(),
+                    out_token_src: ctx.remaining_accounts.get(8).unwrap().clone(),
                     out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token agent swap destination
-                    fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
+                    fees_token: ctx.remaining_accounts.get(9).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
                 let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
-                if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
+                if ctx.remaining_accounts.len() > 10 { // Oracle Data Account (if needed)
+                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(10).unwrap().clone()]);
                 }
                 swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_initial_amount)?;
             }
@@ -487,14 +488,13 @@ mod token_agent {
         subscr.token_mint = *ctx.accounts.token_mint.to_account_info().key;
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
         subscr.swap_account = swap_account;
+        subscr.subscr_id = inp_subscr_id;
         subscr.rebill_events = 0;
-        subscr.rebill_max = inp_rebill_max;
+        subscr.rebill_max = 0; // Moved to update
         subscr.next_rebill = inp_next_rebill;
         subscr.max_delay = max_delay;
-        subscr.not_valid_before = inp_not_valid_before;
-        subscr.not_valid_after = inp_not_valid_after;
-        subscr.subscr_uuid = inp_subscr_uuid;
-        subscr.tx_uuid = inp_initial_tx_uuid;
+        subscr.not_valid_before = 0; // Moved to update
+        subscr.not_valid_after = 0; // Moved to update
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.active = true;
@@ -506,8 +506,7 @@ mod token_agent {
             event_hash: 176440469768111763486207729736362869784, // solana/program/token-agent/subscribe
             slot: clock.slot,
             subscr_data: ctx.accounts.subscr_data.key(),
-            subscr_uuid: inp_subscr_uuid,
-            tx_uuid: inp_initial_tx_uuid,
+            subscr_id: inp_subscr_id,
             rebill_event: 0,
             amount: inp_initial_amount,
             next_rebill: inp_next_rebill,
@@ -521,7 +520,6 @@ mod token_agent {
         inp_active: bool,
         inp_link_token: bool,
         inp_amount: u64,
-        inp_tx_uuid: u128,
         inp_user_nonce: u8,
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
@@ -533,7 +531,6 @@ mod token_agent {
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
         inp_swap: bool,
-        inp_swap_link: bool,
         inp_swap_root_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
@@ -556,8 +553,7 @@ mod token_agent {
                 event_hash: 163361025719893016519135760137561968517, // solana/program/token-agent/update_subscription/cancel
                 slot: clock.slot,
                 subscr_data: subscr.key(),
-                subscr_uuid: subscr.subscr_uuid,
-                tx_uuid: 0,
+                subscr_id: subscr.subscr_id,
                 rebill_event: 0,
                 amount: 0,
                 next_rebill: -1,
@@ -702,7 +698,7 @@ mod token_agent {
             swap_account = acc_swap_token.key();
 
             // Setup up token delegate if needed
-            if inp_swap_link {
+            if inp_link_token {
                 let cpi_accounts = Approve {
                     to: acc_swap_token.clone(),
                     delegate: ctx.accounts.user_agent.to_account_info(),
@@ -826,17 +822,13 @@ mod token_agent {
         subscr.period = inp_period;
         subscr.budget = inp_budget;
         subscr.swap = inp_swap;
-        if inp_tx_uuid != 0 {
-            subscr.tx_uuid = inp_tx_uuid;
-        }
 
         msg!("atellix-log");
         emit!(SubscrEvent {
             event_hash: 298296161986799263364555576740275705662, // solana/program/token-agent/update_subscription
             slot: clock.slot,
             subscr_data: subscr.key(),
-            subscr_uuid: subscr.subscr_uuid,
-            tx_uuid: inp_tx_uuid,
+            subscr_id: subscr.subscr_id,
             rebill_event: 0,
             amount: inp_amount,
             next_rebill: inp_next_rebill,
@@ -898,8 +890,7 @@ mod token_agent {
             event_hash: 14511983483732720963723889670203659368, // solana/program/token-agent/manager_cancel
             slot: clock.slot,
             subscr_data: subscr.key(),
-            subscr_uuid: subscr.subscr_uuid,
-            tx_uuid: 0,
+            subscr_id: subscr.subscr_id,
             rebill_event: 0,
             amount: 0,
             next_rebill: -1,
@@ -914,7 +905,6 @@ mod token_agent {
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
         inp_net_nonce: u8,
-        inp_rebill_uuid: u128,
         inp_rebill_ts: i64,
         inp_rebill_str: String,
         inp_next_rebill: i64,
@@ -1155,7 +1145,6 @@ mod token_agent {
 
         // Update parameters
         subscr.next_rebill = inp_next_rebill;
-        subscr.tx_uuid = inp_rebill_uuid;
         subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
 
         msg!("atellix-log");
@@ -1163,8 +1152,7 @@ mod token_agent {
             event_hash: 196800858676461937700417377973077375575, // solana/program/token-agent/process
             slot: clock.slot,
             subscr_data: subscr.key(),
-            subscr_uuid: subscr.subscr_uuid,
-            tx_uuid: inp_rebill_uuid,
+            subscr_id: subscr.subscr_id,
             rebill_event: subscr.rebill_events,
             amount: inp_amount,
             next_rebill: inp_next_rebill,
@@ -1246,7 +1234,6 @@ mod token_agent {
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
         inp_net_nonce: u8,
-        inp_payment_uuid: u128,
         inp_amount: u64,
         inp_swap: bool,
         inp_swap_root_nonce: u8,
@@ -1392,7 +1379,6 @@ mod token_agent {
         emit!(PaymentEvent {
             event_hash: 43781034894216267743388154650854733336, // solana/program/token-agent/merchant_payment
             slot: clock.slot,
-            payment_uuid: inp_payment_uuid,
             amount: inp_amount,
             swap: inp_swap,
         });
@@ -1925,14 +1911,13 @@ pub struct SubscrData {
     pub token_account: Pubkey,          // The token account to pay for the subscription
     pub swap_account: Pubkey,           // The token account to swap from if using a different mint for payments
     // Subscription details below
+    pub subscr_id: u64,                 // External subscription ID 
     pub rebill_events: u32,             // Count of rebill events
     pub rebill_max: u32,                // Maximum number of times to rebill (0 = unlimited)
     pub next_rebill: i64,               // The start of the next rebilling period (actual rebilling may happen later)
     pub not_valid_before: i64,          // UTC timestamp before which no subscription processing can occur
     pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
     pub max_delay: i64,                 // The number of seconds after the start of the rebill period the manager can be delayed in attempting to rebill
-    pub subscr_uuid: u128,              // Subscription UUID
-    pub tx_uuid: u128,              // Last Rebill UUID
     pub period: u8,                     // Subscription rebill period
     pub budget: u64,                    // Subscription budget (maximum amount, not necessarily the amount that will be billed which could be less)
     pub active: bool,                   // Subscription is active
@@ -1953,14 +1938,13 @@ impl Default for SubscrData {
             token_mint: Pubkey::default(),
             token_account: Pubkey::default(),
             swap_account: Pubkey::default(),
+            subscr_id: 0,
             rebill_events: 0,
             rebill_max: 0,
             next_rebill: 0,
             not_valid_before: 0,
             not_valid_after: 0,
             max_delay: 0,
-            subscr_uuid: 0,
-            tx_uuid: 0,
             period: 0,
             budget: 0,
             active: false,
@@ -1987,8 +1971,7 @@ pub struct SubscrEvent {
     pub event_hash: u128,
     pub slot: u64,
     pub subscr_data: Pubkey,
-    pub subscr_uuid: u128,
-    pub tx_uuid: u128,
+    pub subscr_id: u64,
     pub rebill_event: u32,
     pub amount: u64,
     pub next_rebill: i64,
@@ -1999,7 +1982,6 @@ pub struct SubscrEvent {
 pub struct PaymentEvent {
     pub event_hash: u128,
     pub slot: u64,
-    pub payment_uuid: u128,
     pub amount: u64,
     pub swap: bool,
 }
