@@ -4,7 +4,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/atellix/token-agent">
-    <img src="https://media.atellix.net/atellix_token_agent.png" alt="Logo" width="512" height="512"/>
+    <img src="https://media.atellix.net/atellix_token_agent_1.png" alt="Logo" width="300" height="300"/>
   </a>
   <h3 align="center">Token Agent</h3>
 </div>
