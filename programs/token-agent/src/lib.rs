@@ -208,7 +208,7 @@ mod token_agent {
         inp_net_nonce: u8,
         inp_subscr_id: u64,
         inp_period: u8,
-        inp_budget: u64,
+        inp_period_budget: u64,
         inp_next_rebill: i64,
         inp_swap: bool,
         inp_swap_root_nonce: u8,
@@ -489,15 +489,17 @@ mod token_agent {
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
         subscr.swap_account = swap_account;
         subscr.subscr_id = inp_subscr_id;
-        subscr.rebill_events = 0;
-        subscr.rebill_max = 0; // Moved to update
+        //subscr.rebill_events = 0;               // Same as default value
+        //subscr.rebill_max = 0;                  // Update to set
         subscr.next_rebill = inp_next_rebill;
         subscr.max_delay = max_delay;
-        subscr.not_valid_before = 0; // Moved to update
-        subscr.not_valid_after = 0; // Moved to update
+        //subscr.not_valid_before = 0;            // Update to set
+        //subscr.not_valid_after = 0;             // Update to set
         subscr.period = inp_period;
-        subscr.budget = inp_budget;
-        subscr.active = true;
+        subscr.period_budget = inp_period_budget;
+        //subscr.use_total = false;               // Update to set
+        //subscr.total_budget = 0;                // Update to set
+        //subscr.active = true;                   // Same as default value
         subscr.swap = inp_swap;
         store_struct::<SubscrData>(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
@@ -525,7 +527,8 @@ mod token_agent {
         inp_root_nonce: u8,
         inp_net_nonce: u8,
         inp_period: u8,
-        inp_budget: u64,
+        inp_period_budget: u64,
+        inp_total_budget: u64,
         inp_next_rebill: i64,
         inp_rebill_max: u32,
         inp_not_valid_before: i64,
@@ -733,20 +736,20 @@ mod token_agent {
                 let sw_accounts = Swap {
                     root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
                     auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    swap_user: ctx.remaining_accounts.get(4).unwrap().clone(),      // User Agent PDA (signer)
-                    swap_data: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    inb_info: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    swap_user: ctx.accounts.user_key.to_account_info(),
+                    swap_data: ctx.remaining_accounts.get(4).unwrap().clone(),
+                    inb_info: ctx.remaining_accounts.get(5).unwrap().clone(),
                     inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(7).unwrap().clone(),
-                    out_info: ctx.remaining_accounts.get(8).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(9).unwrap().clone(),
+                    inb_token_dst: ctx.remaining_accounts.get(6).unwrap().clone(),
+                    out_info: ctx.remaining_accounts.get(7).unwrap().clone(),
+                    out_token_src: ctx.remaining_accounts.get(8).unwrap().clone(),
                     out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
-                    fees_token: ctx.remaining_accounts.get(10).unwrap().clone(),
+                    fees_token: ctx.remaining_accounts.get(9).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
                 let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
-                if ctx.remaining_accounts.len() > 11 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(11).unwrap().clone()]);
+                if ctx.remaining_accounts.len() > 10 { // Oracle Data Account (if needed)
+                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(10).unwrap().clone()]);
                 }
                 swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
             }
@@ -820,8 +823,14 @@ mod token_agent {
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.period = inp_period;
-        subscr.budget = inp_budget;
+        subscr.period_budget = inp_period_budget;
+        subscr.total_budget = inp_total_budget;
         subscr.swap = inp_swap;
+        if inp_total_budget > 0 {
+            subscr.use_total = true;
+        } else {
+            subscr.use_total = false;
+        }
 
         msg!("atellix-log");
         emit!(SubscrEvent {
@@ -1051,14 +1060,21 @@ mod token_agent {
             msg!("Next rebill out of sequence");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
-        if inp_amount > subscr.budget {
-            msg!("Amount exceeds budget");
-            return Err(ErrorCode::BudgetExceeded.into());
-        }
 
         //msg!("Atellix: Process rebill");
 
         if inp_amount > 0 {
+            if inp_amount > subscr.period_budget {
+                msg!("Amount exceeds budget");
+                return Err(ErrorCode::PeriodBudgetExceeded.into());
+            }
+            if subscr.use_total {
+                if inp_amount > subscr.total_budget {
+                    msg!("Amount exceeds total budget");
+                    return Err(ErrorCode::TotalBudgetExceeded.into());
+                }
+                subscr.total_budget = subscr.total_budget.checked_sub(inp_amount).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+            }
             // Swap if requested
             let user_pda_seeds = &[subscr.user_key.as_ref(), &[inp_user_nonce]];
             let user_pda_signer = &[&user_pda_seeds[..]];
@@ -1083,8 +1099,6 @@ mod token_agent {
                     fees_token: ctx.remaining_accounts.get(9).unwrap().clone(),
                     token_program: ctx.accounts.token_program.to_account_info(),
                 };
-                let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
-                let signer = &[&seeds[..]];
                 let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, user_pda_signer);
                 if ctx.remaining_accounts.len() > 10 { // Oracle Data Account (if needed)
                     sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(10).unwrap().clone()]);
@@ -1918,7 +1932,9 @@ pub struct SubscrData {
     pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
     pub max_delay: i64,                 // The number of seconds after the start of the rebill period the manager can be delayed in attempting to rebill
     pub period: u8,                     // Subscription rebill period
-    pub budget: u64,                    // Subscription budget (maximum amount, not necessarily the amount that will be billed which could be less)
+    pub period_budget: u64,             // Per-rebill budget (maximum amount, not necessarily the amount that will be billed which could be less)
+    pub use_total: bool,                // Enable a total budget for the entire subscription (for manager initiated payments, user initiated payments do not count towards this limit)
+    pub total_budget: u64,              // Total budget for the entire subscription
     pub active: bool,                   // Subscription is active
     pub swap: bool,                     // Swap tokens before payment
 }
@@ -1945,8 +1961,10 @@ impl Default for SubscrData {
             not_valid_after: 0,
             max_delay: 0,
             period: 0,
-            budget: 0,
-            active: false,
+            period_budget: 0,
+            use_total: false,
+            total_budget: 0,
+            active: true,
             swap: false,
         }
     }
@@ -2020,8 +2038,10 @@ pub enum ErrorCode {
     InvalidNonce,
     #[msg("Not approved")]
     NotApproved,
-    #[msg("Budget exceeded")]
-    BudgetExceeded,
+    #[msg("Total budget exceeded")]
+    TotalBudgetExceeded,
+    #[msg("Period budget exceeded")]
+    PeriodBudgetExceeded,
     #[msg("Allowance exceeded")]
     AllowanceExceeded,
     #[msg("Access denied")]
