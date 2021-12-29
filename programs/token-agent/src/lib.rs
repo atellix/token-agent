@@ -528,6 +528,7 @@ mod token_agent {
         inp_net_nonce: u8,
         inp_period: u8,
         inp_period_budget: u64,
+        inp_use_total: bool,
         inp_total_budget: u64,
         inp_next_rebill: i64,
         inp_rebill_max: u32,
@@ -824,13 +825,9 @@ mod token_agent {
         subscr.not_valid_after = inp_not_valid_after;
         subscr.period = inp_period;
         subscr.period_budget = inp_period_budget;
+        subscr.use_total = inp_use_total;
         subscr.total_budget = inp_total_budget;
         subscr.swap = inp_swap;
-        if inp_total_budget > 0 {
-            subscr.use_total = true;
-        } else {
-            subscr.use_total = false;
-        }
 
         msg!("atellix-log");
         emit!(SubscrEvent {
@@ -1032,7 +1029,7 @@ mod token_agent {
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         if ts < inp_rebill_ts && false { // <=== TESTING ONLY !!! REMOVE BEFORE LAUNCH !!!
-            msg!("Invalid rebill timestamp after current time");
+            msg!("Rebill timestamp after current time");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         if subscr.next_rebill != inp_rebill_ts {

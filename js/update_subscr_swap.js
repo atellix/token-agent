@@ -47,6 +47,38 @@ async function main() {
     }
     const netData = JSON.parse(ndjs.toString())
     //console.log(netData)
+
+    var spjs
+    try {
+        spjs = await fs.readFile('../../data/swap.json')
+    } catch (error) {
+        console.error('File Error: ', error)
+    }
+    const swapCache = JSON.parse(spjs.toString())
+
+    var djs
+    try {
+        djs = await fs.readFile('../../data/swap-usdv-wsol.json')
+    } catch (error) {
+        console.error('File Error: ', error)
+    }
+    const swapSpec = JSON.parse(djs.toString())
+
+    const swapContractPK = new PublicKey(swapCache.swapContractProgram)
+    const tokenMint1 = new PublicKey(swapSpec.tokenMint1)
+    const tokenMint2 = new PublicKey(swapSpec.tokenMint2)
+    const swapAuthDataPK = new PublicKey(swapCache.swapContractRBAC)
+    const swapDataPK = new PublicKey(swapSpec.swapData)
+    const swapFeesTK = new PublicKey(swapSpec.feesToken)
+
+    const swapRootData = await programAddress([swapContractPK.toBuffer()], swapContractPK)
+    const tkiData1 = await programAddress([tokenMint1.toBuffer()], swapContractPK)
+    const tkiData2 = await programAddress([tokenMint2.toBuffer()], swapContractPK)
+    const tokData1 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint1)
+    const tokData2 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint2)
+
+    const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
+
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
@@ -59,6 +91,9 @@ async function main() {
     const managerSK = importSecretKey(netData.manager1_secret)
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
+    const agentToken = await associatedTokenAddress(new PublicKey(rootKey.pubkey), tokenMint)
+    const tokenAccount = new PublicKey(agentToken.pubkey)
+
     var act = await tokenAgent.account.subscrData.fetch(subscrData)
     console.log('Initial Subscription Data')
     console.log(act)
@@ -69,6 +104,7 @@ async function main() {
     dt0 = dt0.minus({ hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ days: 1 })
     var dts0 = dt0.toFormat("yyyyLLdd")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
+    act.swap = true
     act.period = 0
     act.periodBudget = new anchor.BN(100000)
     act.useTotal = false
@@ -91,13 +127,12 @@ async function main() {
         act.notValidBefore,                             // inp_not_valid_before
         act.notValidAfter,                              // inp_not_valid_after
         act.swap,                                       // inp_swap
-        0,                                              // inp_swap_root_nonce
-        0,                                              // inp_swap_inb_nonce
-        0,                                              // inp_swap_out_nonce
-        0,                                              // inp_swap_dst_nonce
+        swapRootData.nonce,                             // inp_swap_root_nonce
+        tokData1.nonce,                                 // inp_swap_inb_nonce
+        tokData2.nonce,                                 // inp_swap_out_nonce
+        agentToken.nonce,                               // inp_swap_dst_nonce
         {
             accounts: {
-                //subscrData: new PublicKey('Fxg4sFxmiWFPaxS7Xtgnk4J83grzcky9ZpMd6GyutEPd'),
                 subscrData: subscrData,
                 netAuth: netAuth,
                 netRoot: new PublicKey(netRoot.pubkey),
@@ -112,9 +147,22 @@ async function main() {
                 userAgent: act.userAgent,
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenMint: act.tokenMint,
-                tokenAccount: act.tokenAccount,
+                tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
-            }
+            },
+            remainingAccounts: [
+                { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
+                { pubkey: swapContractPK, isWritable: false, isSigner: false },
+                { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
+                { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
+                { pubkey: swapDataPK, isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tkiData2.pubkey), isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
+                { pubkey: swapFeesTK, isWritable: true, isSigner: false },
+                { pubkey: new PublicKey('DpoK8Zz69APV9ntjuY9C4LZCxANYMV56M2cbXEdkjxME'), isWritable: false, isSigner: false },
+            ],
         }
     )
     console.log(txsig)
@@ -139,9 +187,9 @@ async function main() {
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
             new anchor.BN(10000),                           // inp_amount
-            0,                                              // inp_swap_root_nonce
-            0,                                              // inp_swap_inb_nonce
-            0,                                              // inp_swap_out_nonce
+            swapRootData.nonce,                             // inp_swap_root_nonce
+            tokData1.nonce,                                 // inp_swap_inb_nonce
+            tokData2.nonce,                                 // inp_swap_out_nonce
             {
                 accounts: {
                     subscrData: subscrData,
@@ -159,7 +207,20 @@ async function main() {
                     tokenMint: act.tokenMint,
                     tokenAccount: act.tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),
-                }
+                },
+                remainingAccounts: [
+                    { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: swapContractPK, isWritable: false, isSigner: false },
+                    { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
+                    { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
+                    { pubkey: swapDataPK, isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tkiData2.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: swapFeesTK, isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey('DpoK8Zz69APV9ntjuY9C4LZCxANYMV56M2cbXEdkjxME'), isWritable: false, isSigner: false },
+                ],
             }
         )
         rbtx = await provider.send(tx3, [managerSK])
