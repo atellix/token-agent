@@ -1060,6 +1060,8 @@ mod token_agent {
 
         if inp_amount > 0 {
             // Swap if requested
+            let user_pda_seeds = &[subscr.user_key.as_ref(), &[inp_user_nonce]];
+            let user_pda_signer = &[&user_pda_seeds[..]];
             if subscr.swap {
                 //msg!("Atellix: Attempt swap");
                 let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
@@ -1070,7 +1072,7 @@ mod token_agent {
                 let sw_accounts = Swap {
                     root_data: ctx.remaining_accounts.get(2).unwrap().clone(),
                     auth_data: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    swap_user: ctx.accounts.user_agent.to_account_info(),           // User Agent PDA (signer)
+                    swap_user: ctx.accounts.user_agent.to_account_info(),          // User Agent (signer)
                     swap_data: ctx.remaining_accounts.get(4).unwrap().clone(),
                     inb_info: ctx.remaining_accounts.get(5).unwrap().clone(),
                     inb_token_src: acc_swap_token.clone(),
@@ -1083,15 +1085,12 @@ mod token_agent {
                 };
                 let seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
                 let signer = &[&seeds[..]];
-                let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, signer);
+                let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, user_pda_signer);
                 if ctx.remaining_accounts.len() > 10 { // Oracle Data Account (if needed)
                     sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(10).unwrap().clone()]);
                 }
                 swap_contract::cpi::swap(sw_ctx, inp_swap_root_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, true, inp_amount)?;
             }
-
-            let user_pda_seeds = &[subscr.user_key.as_ref(), &[inp_user_nonce]];
-            let user_pda_signer = &[&user_pda_seeds[..]];
             let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
             let root_pda_signer = &[&root_pda_seeds[..]];
             let mut signer = user_pda_signer;

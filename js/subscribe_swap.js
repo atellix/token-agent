@@ -176,24 +176,18 @@ async function main() {
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
     var dts0 = dt0.toFormat("yyyyLL")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
-    const transactId = uuidv4()
     let apires = await tokenAgent.rpc.subscribe(
         true,                                           // link_token
         new anchor.BN(100000),                          // initial_amount
-        new anchor.BN(uuidparse(transactId)),           // initial_tx_uuid
         userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
         netRoot.nonce,                                  // inp_net_nonce
-        new anchor.BN(uuidparse(subscrId)),             // inp_subscr_uuid
+        new anchor.BN(0),                               // inp_subscr_id
         2,                                              // inp_period (2 = monthly)
         new anchor.BN(150000),                          // inp_budget
         new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_next_rebill
-        0,                                              // inp_rebill_max
-        new anchor.BN(0),                               // inp_not_valid_before
-        new anchor.BN(0),                               // inp_not_valid_after
         true,                                           // inp_swap
-        true,                                           // inp_swap_link
         swapRootData.nonce,                             // inp_swap_root_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
@@ -222,7 +216,6 @@ async function main() {
                 { pubkey: swapContractPK, isWritable: false, isSigner: false },
                 { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
                 { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
-                { pubkey: provider.wallet.publicKey, isWritable: false, isSigner: true },
                 { pubkey: swapDataPK, isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
@@ -261,7 +254,6 @@ async function main() {
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
             rootKey.nonce,                                  // inp_root_nonce
             netRoot.nonce,                                  // inp_net_nonce
-            new anchor.BN(uuidparse(eventId)),              // inp_rebill_uuid
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
@@ -292,7 +284,6 @@ async function main() {
                     { pubkey: swapContractPK, isWritable: false, isSigner: false },
                     { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
                     { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
-                    { pubkey: provider.wallet.publicKey, isWritable: false, isSigner: true },
                     { pubkey: swapDataPK, isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
