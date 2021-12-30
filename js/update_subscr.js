@@ -90,6 +90,7 @@ async function main() {
         act.rebillMax,                                  // inp_rebill_max
         act.notValidBefore,                             // inp_not_valid_before
         act.notValidAfter,                              // inp_not_valid_after
+        act.maxDelay,                                   // inp_max_delay
         act.swap,                                       // inp_swap
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce

@@ -264,11 +264,11 @@ mod token_agent {
             return Err(ErrorCode::InvalidSubscriptionPeriod.into());
         }
         let max_delay: i64 = match period.unwrap() {                // Delay from start of billing cycle to accept rebills
-            SubscriptionPeriod::Daily => (60 * 60 * 48),            // 2 days
-            SubscriptionPeriod::Weekly => (60 * 60 * 24 * 14),      // 2 weeks
-            SubscriptionPeriod::Monthly => (60 * 60 * 24 * 60),     // ~2 months
-            SubscriptionPeriod::Quarterly => (60 * 60 * 24 * 180),  // ~2 quarters
-            SubscriptionPeriod::Yearly => (60 * 60 * 24 * 365 * 2), // ~2 years
+            SubscriptionPeriod::Daily => (60 * 60 * 24 * 365),      // 1 year
+            SubscriptionPeriod::Weekly => (60 * 60 * 24 * 365),     // 1 year
+            SubscriptionPeriod::Monthly => (60 * 60 * 24 * 365),    // 1 year
+            SubscriptionPeriod::Quarterly => (60 * 60 * 24 * 365),  // 1 year
+            SubscriptionPeriod::Yearly => (60 * 60 * 24 * 365 * 2), // 2 years
         };
 
         // Moved to update to save space in transaction request
@@ -534,6 +534,7 @@ mod token_agent {
         inp_rebill_max: u32,
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
+        inp_max_delay: i64,
         inp_swap: bool,
         inp_swap_root_nonce: u8,
         inp_swap_inb_nonce: u8,
@@ -615,13 +616,6 @@ mod token_agent {
             msg!("Invalid subscription period");
             return Err(ErrorCode::InvalidSubscriptionPeriod.into());
         }
-        let max_delay: i64 = match period.unwrap() {                // Delay from start of billing cycle to accept rebills
-            SubscriptionPeriod::Daily => (60 * 60 * 48),            // 2 days
-            SubscriptionPeriod::Weekly => (60 * 60 * 24 * 14),      // 2 weeks
-            SubscriptionPeriod::Monthly => (60 * 60 * 24 * 60),     // ~2 months
-            SubscriptionPeriod::Quarterly => (60 * 60 * 24 * 180),  // ~2 quarters
-            SubscriptionPeriod::Yearly => (60 * 60 * 24 * 365 * 2), // ~2 years
-        };
         if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
             msg!("Invalid subscription start");
             return Err(ErrorCode::InvalidTimeframe.into());
@@ -636,6 +630,10 @@ mod token_agent {
                 return Err(ErrorCode::InvalidTimeframe.into());
             }
         }
+        if inp_max_delay < 43200 { // 12 hours
+            msg!("Invalid max_delay below minimum of 12 hours (43200 seconds)");
+            return Err(ErrorCode::InvalidTimeframe.into());
+        }
         if inp_next_rebill < 0 {
             msg!("Invalid negative next_rebill");
             return Err(ErrorCode::InvalidTimeframe.into());
@@ -648,7 +646,7 @@ mod token_agent {
         if inp_not_valid_before > 0 {
             timeframe_start = inp_not_valid_before;
         }
-        let timeframe_end = timeframe_start.checked_add(max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let timeframe_end = timeframe_start.checked_add(inp_max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
         if inp_next_rebill < timeframe_start || inp_next_rebill > timeframe_end {
             msg!("Next rebill not within timeframe");
             return Err(ErrorCode::InvalidTimeframe.into());
@@ -820,7 +818,7 @@ mod token_agent {
         subscr.swap_account = swap_account;
         subscr.rebill_max = inp_rebill_max;
         subscr.next_rebill = inp_next_rebill;
-        subscr.max_delay = max_delay;
+        subscr.max_delay = inp_max_delay;
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.period = inp_period;
@@ -1029,7 +1027,7 @@ mod token_agent {
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         if ts < inp_rebill_ts && false { // <=== TESTING ONLY !!! REMOVE BEFORE LAUNCH !!!
-            msg!("Rebill timestamp after current time");
+            msg!("Attempted rebill before scheduled time");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         if subscr.next_rebill != inp_rebill_ts {
