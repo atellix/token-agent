@@ -37,7 +37,7 @@ function importSecretKey(keyStr) {
 }
 
 async function main() {
-    const subscrData = new PublicKey('3GLs5w1zUufJ83nM5WKx2x8gB8uCraaQm4R8Q8UtUwWb')
+    const subscrData = new PublicKey('D9s6vgXXBUhdgAKVvPMSjtK2nMUrDbPYtvW4EhhmPfx9')
 
     var ndjs
     try {
@@ -126,6 +126,7 @@ async function main() {
         act.rebillMax,                                  // inp_rebill_max
         act.notValidBefore,                             // inp_not_valid_before
         act.notValidAfter,                              // inp_not_valid_after
+        act.maxDelay,                                   // inp_max_delay
         act.swap,                                       // inp_swap
         swapRootData.nonce,                             // inp_swap_root_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce

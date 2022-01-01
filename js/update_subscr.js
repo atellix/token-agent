@@ -37,7 +37,7 @@ function importSecretKey(keyStr) {
 }
 
 async function main() {
-    const subscrData = new PublicKey('3GLs5w1zUufJ83nM5WKx2x8gB8uCraaQm4R8Q8UtUwWb')
+    const subscrData = new PublicKey('6ZjraC4VGWd4oY1qTwyE4YqSBy2c2vhHoRV5bpKwF4TN')
 
     var ndjs
     try {
