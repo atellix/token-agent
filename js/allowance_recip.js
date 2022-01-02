@@ -34,6 +34,7 @@ async function main() {
     const tokenMint = new PublicKey('5dH5PLd8VRSbdo5K9Ftkf2Bsqbmre3raErZYMB3vYDww')
     const tokenAccount = new PublicKey('27ik9WP4p85Nhgoy7Us49pJ1JDAcR22hnbteSBdfuqHE')
     const tokenRecipient = new PublicKey('3Qh11vYtpKamT8WK8mD5UgdeBCk3gP8Z5eh3oe98AsGC')
+    const tokenRecipient2 = new PublicKey('ETvRsP3BgBSJ3MtApN3WAs9asYH4ktj6BCZEi4xu8Txa')
 
     //const subscrId = uuidv4()
     //const subscrData = anchor.web3.Keypair.generate()
@@ -60,6 +61,7 @@ async function main() {
         tokenMint.toBuffer(),
         tokenAccount.toBuffer(),
         managerPK.publicKey.toBuffer(),
+        tokenRecipient.toBuffer(),
     ]
     const userAllowance = await programAddress(allowanceSpec)
     const allowanceBytes = tokenAgent.account.tokenAllowance.size
@@ -95,7 +97,9 @@ async function main() {
                     tokenProgram: TOKEN_PROGRAM_ID,
                     systemProgram: SystemProgram.programId,
                 },
-                //remainingAccounts: [],
+                remainingAccounts: [
+                    { pubkey: tokenRecipient, isWritable: false, isSigner: false },
+                ],
             }
         )
     }
@@ -105,49 +109,6 @@ async function main() {
             userAgent.nonce,                            // User agent nonce
             userAllowance.nonce,                        // Allowance nonce
             new anchor.BN(50 * 10000),                  // Amount
-            {
-                signers: [managerPK],
-                accounts: {
-                    allowanceData: new PublicKey(userAllowance.pubkey),
-                    userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
-                    userToken: tokenAccount,                            // From
-                    tokenRecipient: tokenRecipient,                     // To
-                    delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
-                    tokenProgram: TOKEN_PROGRAM_ID,
-                },
-            }
-        )
-    }
-    if (true) {
-        console.log('Update Allowance')
-        await tokenAgent.rpc.updateAllowance(
-            true,                                       // Link token
-            userAgent.nonce,                            // User agent nonce
-            userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(1000 * 10000),                // Amount
-            new anchor.BN(0),                           // Start time, or 0 for none
-            new anchor.BN(0),                           // Expire time, or 0 for none
-            {
-                accounts: {
-                    allowanceData: new PublicKey(userAllowance.pubkey),
-                    userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
-                    delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
-                    tokenAccount: tokenAccount,
-                    tokenProgram: TOKEN_PROGRAM_ID,
-                },
-            }
-        )
-    }
-    if (true) {
-        console.log('Perform Delegated Transfer 2')
-        await tokenAgent.rpc.delegatedTransfer(
-            userAgent.nonce,                            // User agent nonce
-            userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(30 * 10000),                  // Amount
             {
                 signers: [managerPK],
                 accounts: {

@@ -44,7 +44,7 @@ async function main() {
         console.error('File Error: ', error)
     }
     const netData = JSON.parse(ndjs.toString())
-    //console.log(netData)
+    console.log(netData)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
     const walletToken = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
@@ -107,12 +107,13 @@ async function main() {
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
         netRoot.nonce,                                  // inp_net_nonce
-        new anchor.BN(uuidparse(transactId)),           // inp_payment_uuid
+        new anchor.BN(1234),                            // inp_payment_id
         new anchor.BN(20 * (10**4)),                    // inp_amount
         false,                                          // inp_swap
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
+        0,                                              // inp_swap_dst_nonce
         {
             accounts: {
                 netAuth: netAuth,
