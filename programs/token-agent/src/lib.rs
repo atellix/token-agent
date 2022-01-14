@@ -365,6 +365,8 @@ mod token_agent {
 
         // Perform transfer
         let mut swap_account: Pubkey = Pubkey::default();
+        let mut net_amount: u64 = inp_initial_amount;
+        let mut fee_amount: u64 = 0;
         if inp_initial_amount > 0 {
             // Swap if requested
             if inp_swap {
@@ -434,14 +436,14 @@ mod token_agent {
             }
 
             // Calculate fees
-            let mut amount: u64 = inp_initial_amount;
             if mrch_approval.fees_bps > 0 {
-                let f1: u128 = (amount as u128) << 64;
+                let f1: u128 = (net_amount as u128) << 64;
                 let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
@@ -460,7 +462,7 @@ mod token_agent {
             };
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-            token::transfer(cpi_ctx, amount)?;
+            token::transfer(cpi_ctx, net_amount)?;
 
             // Record merchant revenue
             let na_accounts = RecordRevenue {
@@ -472,7 +474,7 @@ mod token_agent {
             let na_program = ctx.accounts.net_auth.clone();
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
-            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
         }
 
         // Create subscription data
@@ -510,7 +512,9 @@ mod token_agent {
             subscr_data: ctx.accounts.subscr_data.key(),
             subscr_id: inp_subscr_id,
             rebill_event: 0,
-            amount: inp_initial_amount,
+            total: inp_initial_amount,
+            amount: net_amount,
+            fees: fee_amount,
             next_rebill: inp_next_rebill,
             swap: inp_swap,
         });
@@ -544,7 +548,6 @@ mod token_agent {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
         let subscr = &mut ctx.accounts.subscr_data;
-
         // Verify user key is the same
         verify_matching_accounts(&subscr.user_key, &ctx.accounts.user_key.to_account_info().key,
             Some(String::from("User key does not match"))
@@ -560,7 +563,9 @@ mod token_agent {
                 subscr_data: subscr.key(),
                 subscr_id: subscr.subscr_id,
                 rebill_event: 0,
+                total: 0,
                 amount: 0,
+                fees: 0,
                 next_rebill: -1,
                 swap: subscr.swap,
             });
@@ -712,6 +717,8 @@ mod token_agent {
             }
         }
 
+        let mut net_amount: u64 = inp_amount;
+        let mut fee_amount: u64 = 0;
         if inp_amount > 0 {
             // Swap if requested
             if inp_swap {
@@ -765,14 +772,14 @@ mod token_agent {
             }
 
             // Calculate fees
-            let mut amount: u64 = inp_amount;
             if mrch_approval.fees_bps > 0 {
-                let f1: u128 = (amount as u128) << 64;
+                let f1: u128 = (net_amount as u128) << 64;
                 let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
@@ -791,7 +798,7 @@ mod token_agent {
             };
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-            token::transfer(cpi_ctx, amount)?;
+            token::transfer(cpi_ctx, net_amount)?;
 
             // Record merchant revenue
             let na_accounts = RecordRevenue {
@@ -803,7 +810,7 @@ mod token_agent {
             let na_program = ctx.accounts.net_auth.clone();
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
-            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
         }
 
         // Update subscription data
@@ -834,7 +841,9 @@ mod token_agent {
             subscr_data: subscr.key(),
             subscr_id: subscr.subscr_id,
             rebill_event: 0,
-            amount: inp_amount,
+            total: inp_amount,
+            amount: net_amount,
+            fees: fee_amount,
             next_rebill: inp_next_rebill,
             swap: inp_swap,
         });
@@ -896,7 +905,9 @@ mod token_agent {
             subscr_data: subscr.key(),
             subscr_id: subscr.subscr_id,
             rebill_event: 0,
+            total: 0,
             amount: 0,
+            fees: 0,
             next_rebill: -1,
             swap: subscr.swap,
         });
@@ -1058,6 +1069,8 @@ mod token_agent {
 
         //msg!("Atellix: Process rebill");
 
+        let mut net_amount: u64 = inp_amount;
+        let mut fee_amount: u64 = 0;
         if inp_amount > 0 {
             if inp_amount > subscr.period_budget {
                 msg!("Amount exceeds budget");
@@ -1110,14 +1123,14 @@ mod token_agent {
             }
 
             // Calculate fees
-            let mut amount: u64 = inp_amount;
             if mrch_approval.fees_bps > 0 {
-                let f1: u128 = (amount as u128) << 64;
+                let f1: u128 = (net_amount as u128) << 64;
                 let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
@@ -1136,7 +1149,7 @@ mod token_agent {
             };
             let cpi_program = ctx.accounts.token_program.clone();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-            token::transfer(cpi_ctx, amount)?;
+            token::transfer(cpi_ctx, net_amount)?;
 
             // Record merchant revenue
             let na_accounts = RecordRevenue {
@@ -1148,7 +1161,7 @@ mod token_agent {
             let na_program = ctx.accounts.net_auth.clone();
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
-            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
         }
 
         // Update parameters
@@ -1162,7 +1175,9 @@ mod token_agent {
             subscr_data: subscr.key(),
             subscr_id: subscr.subscr_id,
             rebill_event: subscr.rebill_events,
-            amount: inp_amount,
+            total: inp_amount,
+            amount: net_amount,
+            fees: fee_amount,
             next_rebill: inp_next_rebill,
             swap: subscr.swap,
         });
@@ -1283,6 +1298,8 @@ mod token_agent {
             Some(String::from("Fees account does not match approval"))
         )?;
 
+        let mut net_amount: u64 = inp_amount;
+        let mut fee_amount: u64 = 0;
         if inp_amount > 0 {
             // Swap if requested
             if inp_swap {
@@ -1333,14 +1350,14 @@ mod token_agent {
             }
 
             // Calculate fees
-            let mut amount: u64 = inp_amount;
             if mrch_approval.fees_bps > 0 {
-                let f1: u128 = (amount as u128) << 64;
+                let f1: u128 = (net_amount as u128) << 64;
                 let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    amount = amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
@@ -1369,7 +1386,7 @@ mod token_agent {
             } else {
                 cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
             }
-            token::transfer(cpi_ctx, amount)?;
+            token::transfer(cpi_ctx, net_amount)?;
 
             // Record merchant revenue
             let na_accounts = RecordRevenue {
@@ -1381,14 +1398,16 @@ mod token_agent {
             let na_program = ctx.accounts.net_auth.clone();
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
-            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, amount)?;
+            net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
         }
 
         msg!("atellix-log");
         emit!(PaymentEvent {
             event_hash: 43781034894216267743388154650854733336, // solana/program/token-agent/merchant_payment
             slot: clock.slot,
-            amount: inp_amount,
+            total: inp_amount,
+            amount: net_amount,
+            fees: fee_amount,
             payment_id: inp_payment_id,
             swap: inp_swap,
         });
@@ -2071,7 +2090,9 @@ pub struct SubscrEvent {
     pub subscr_data: Pubkey,
     pub subscr_id: u64,
     pub rebill_event: u32,
+    pub total: u64,
     pub amount: u64,
+    pub fees: u64,
     pub next_rebill: i64,
     pub swap: bool,
 }
@@ -2080,7 +2101,9 @@ pub struct SubscrEvent {
 pub struct PaymentEvent {
     pub event_hash: u128,
     pub slot: u64,
+    pub total: u64,
     pub amount: u64,
+    pub fees: u64,
     pub payment_id: u64,
     pub swap: bool,
 }
