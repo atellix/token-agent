@@ -19,7 +19,7 @@ use swap_contract::{ cpi::accounts::Swap };
 extern crate decode_account;
 use decode_account::parse_bpf_loader::{ parse_bpf_upgradeable_loader, BpfUpgradeableLoaderAccountType };
 
-declare_id!("D5inTpTZDHbXPQbo5uPU9YrX4Rcjr5VQvpvsRekuz1eF");
+declare_id!("AGNTnsfjdM1NJCvqnuG4jjxs79jRb8himSj1S8DgtFas");
 
 pub const VERSION_MAJOR: u32 = 1;
 pub const VERSION_MINOR: u32 = 0;
