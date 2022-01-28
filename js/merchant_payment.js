@@ -101,6 +101,12 @@ async function main() {
     console.log('User Token 1: ' + userToken1.pubkey)
     console.log('Payment Token: ' + tokenAccount.toString()) */
 
+    var l1 = tokenAgent.addEventListener('PaymentEvent', (evt, slot) => {
+        console.log('PaymentEvent - Slot: ' + slot)
+        console.log(evt.eventHash.toString())
+        console.log(evt)
+    })
+
     const transactId = uuidv4()
     console.log('Merchant Payment: ' + transactId)
     let apires = await tokenAgent.rpc.merchantPayment(

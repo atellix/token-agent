@@ -47,12 +47,13 @@ async function main() {
     //console.log(netData)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
-    const walletToken = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
-    const tokenAccount = new PublicKey(walletToken.pubkey)
 
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
+
+    const agentToken = await associatedTokenAddress(new PublicKey(rootKey.pubkey), tokenMint)
+    const tokenAccount = new PublicKey(agentToken.pubkey)
 
     const subscrId = uuidv4()
     const subscrData = anchor.web3.Keypair.generate()
@@ -78,7 +79,6 @@ async function main() {
 
     console.log('Merchant Account: ' + merchantPK.toString())
     console.log('Merchant Token: ' + merchantTK.pubkey)
-    console.log('Subscription Data: ' + subscrData.publicKey.toString())
 
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
@@ -135,20 +135,47 @@ async function main() {
             programId: tokenAgentPK,
         })
     )
-    await provider.send(tx, [subscrData])
 
-    var l1 = tokenAgent.addEventListener('SubscrEvent', (evt, slot) => {
-        console.log('SubscrEvent - Slot: ' + slot)
-        console.log(evt.eventHash.toString())
-        console.log(evt)
-    })
+    var spjs
+    try {
+        spjs = await fs.readFile('../../data/swap.json')
+    } catch (error) {
+        console.error('File Error: ', error)
+    }
+    const swapCache = JSON.parse(spjs.toString())
 
-    console.log('Subscribe')
+    var djs
+    try {
+        djs = await fs.readFile('../../data/swap-usdv-wsol.json')
+    } catch (error) {
+        console.error('File Error: ', error)
+    }
+    const swapSpec = JSON.parse(djs.toString())
+
+    const swapContractPK = new PublicKey(swapCache.swapContractProgram)
+    const tokenMint1 = new PublicKey(swapSpec.tokenMint1)
+    const tokenMint2 = new PublicKey(swapSpec.tokenMint2)
+    const swapAuthDataPK = new PublicKey(swapCache.swapContractRBAC)
+    const swapDataPK = new PublicKey(swapSpec.swapData)
+    const swapFeesTK = new PublicKey(swapSpec.feesToken)
+
+    const swapRootData = await programAddress([swapContractPK.toBuffer()], swapContractPK)
+    const tkiData1 = await programAddress([tokenMint1.toBuffer()], swapContractPK)
+    const tkiData2 = await programAddress([tokenMint2.toBuffer()], swapContractPK)
+    const tokData1 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint1)
+    const tokData2 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint2)
+
+    const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
+
+    console.log('User Token 1: ' + userToken1.pubkey)
+    console.log('Payment Token: ' + tokenAccount.toString())
+
+    console.log('Subscribe Swap: ' + swapSpec.swapData)
     var dt0 = DateTime.now().setZone('utc')
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
     var dts0 = dt0.toFormat("yyyyLL")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
-    await tokenAgent.rpc.subscribe(
+    let op = await tokenAgent.instruction.subscribe(
         true,                                           // link_token
         new anchor.BN(100000),                          // initial_amount
         userAgent.nonce,                                // inp_user_nonce
@@ -157,16 +184,15 @@ async function main() {
         netRoot.nonce,                                  // inp_net_nonce
         new anchor.BN(0),                               // inp_subscr_id
         2,                                              // inp_period (2 = monthly)
-        new anchor.BN(10000),                           // inp_budget
+        new anchor.BN(150000),                          // inp_budget
         new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_next_rebill
-        false,                                          // inp_swap
-        0,                                              // inp_swap_root_nonce
-        0,                                              // inp_swap_inb_nonce
-        0,                                              // inp_swap_out_nonce
-        0,                                              // inp_swap_dst_nonce
+        true,                                           // inp_swap
+        swapRootData.nonce,                             // inp_swap_root_nonce
+        tokData1.nonce,                                 // inp_swap_inb_nonce
+        tokData2.nonce,                                 // inp_swap_out_nonce
+        agentToken.nonce,                               // inp_swap_dst_nonce
         {
             accounts: {
-                //subscrData: new PublicKey('Fxg4sFxmiWFPaxS7Xtgnk4J83grzcky9ZpMd6GyutEPd'),
                 subscrData: subscrData.publicKey,
                 netAuth: netAuth,
                 netRoot: new PublicKey(netRoot.pubkey),
@@ -183,11 +209,27 @@ async function main() {
                 tokenMint: tokenMint,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
-            }
+            },
+            remainingAccounts: [
+                { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
+                { pubkey: swapContractPK, isWritable: false, isSigner: false },
+                { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
+                { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
+                { pubkey: swapDataPK, isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tkiData2.pubkey), isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
+                { pubkey: swapFeesTK, isWritable: true, isSigner: false },
+                { pubkey: new PublicKey('DpoK8Zz69APV9ntjuY9C4LZCxANYMV56M2cbXEdkjxME'), isWritable: false, isSigner: false },
+            ],
         }
     )
+    tx.add(op)
+    let apires = await provider.send(tx, [subscrData])
+    console.log(apires)
 
-    if (false) {
+    if (true) {
         console.log('Process 1')
 
         console.log({
@@ -204,6 +246,7 @@ async function main() {
             feesAccount: new PublicKey(feesTK.pubkey).toString(),
         })
 
+        var eventId = uuidv4()
         var dt1 = dt0.plus({ months: 1 })
         var dts1 = dt1.toFormat("yyyyLL")
         console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO())
@@ -215,10 +258,10 @@ async function main() {
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
-            new anchor.BN(10000),                           // inp_amount
-            0,                                              // inp_swap_root_nonce
-            0,                                              // inp_swap_inb_nonce
-            0,                                              // inp_swap_out_nonce
+            new anchor.BN(100000),                          // inp_amount
+            swapRootData.nonce,                             // inp_swap_root_nonce
+            tokData1.nonce,                                 // inp_swap_inb_nonce
+            tokData2.nonce,                                 // inp_swap_out_nonce
             {
                 accounts: {
                     subscrData: subscrData.publicKey,
@@ -236,10 +279,24 @@ async function main() {
                     tokenMint: tokenMint,
                     tokenAccount: tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),
-                }
-            }
+                },
+                remainingAccounts: [
+                    { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: swapContractPK, isWritable: false, isSigner: false },
+                    { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
+                    { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
+                    { pubkey: swapDataPK, isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tkiData2.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
+                    { pubkey: swapFeesTK, isWritable: true, isSigner: false },
+                    { pubkey: new PublicKey('DpoK8Zz69APV9ntjuY9C4LZCxANYMV56M2cbXEdkjxME'), isWritable: false, isSigner: false },
+                ],
+            },
         )
-        await provider.send(tx3, [managerSK])
+        let apires2 = await provider.send(tx3, [managerSK])
+        console.log(apires2)
 
         /* console.log('Process 2')
         eventId = uuidv4()

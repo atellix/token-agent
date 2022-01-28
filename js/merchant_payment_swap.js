@@ -44,11 +44,20 @@ async function main() {
         console.error('File Error: ', error)
     }
     const netData = JSON.parse(ndjs.toString())
+
+    var swidl
+    try {
+        swidl = await fs.readFile('../../swap-contract/target/idl/swap_contract.json')
+    } catch (error) {
+        console.error('File Error: ', error)
+    }
+    const swapContractIDL = JSON.parse(swidl.toString())
+
     //console.log(netData)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
     const walletToken = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
-    const tokenAccount = new PublicKey(walletToken.pubkey)
+    //const tokenAccount = new PublicKey(walletToken.pubkey)
 
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
@@ -62,7 +71,6 @@ async function main() {
 
     console.log('Token Account Mint: ' + tokenMint.toString())
     console.log('Token Account Owner: ' + provider.wallet.publicKey.toString())
-    console.log('Token Account Assoc: ' + tokenAccount.toString())
 
     console.log('Merchant Account: ' + merchantPK.toString())
     console.log('Merchant Token: ' + merchantTK.pubkey)
@@ -98,8 +106,25 @@ async function main() {
 
     const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
 
+    const agentToken = await associatedTokenAddress(new PublicKey(rootKey.pubkey), tokenMint)
+    const tokenAccount = new PublicKey(agentToken.pubkey)
+    console.log('Token Account Assoc: ' + tokenAccount.toString())
+
     console.log('User Token 1: ' + userToken1.pubkey)
     console.log('Payment Token: ' + tokenAccount.toString())
+
+    const swapContract = new anchor.Program(swapContractIDL, swapContractPK)
+    var l1 = swapContract.addEventListener('SwapEvent', (evt, slot) => {
+        console.log('Event - Slot: ' + slot)
+        console.log(evt.eventHash.toString())
+        console.log(evt)
+    })
+
+    var l2 = tokenAgent.addEventListener('PaymentEvent', (evt, slot) => {
+        console.log('Event - Slot: ' + slot)
+        console.log(evt.eventHash.toString())
+        console.log(evt)
+    })
 
     const transactId = uuidv4()
     console.log('Merchant Payment: ' + transactId)
@@ -107,12 +132,13 @@ async function main() {
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
         netRoot.nonce,                                  // inp_net_nonce
-        new anchor.BN(uuidparse(transactId)),           // inp_payment_uuid
+        new anchor.BN(12345),                           // inp_payment_id
         new anchor.BN(20 * (10**4)),                    // inp_amount
         true,                                           // inp_swap
         swapRootData.nonce,                             // inp_swap_root_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
+        agentToken.nonce,                               // inp_swap_dst_nonce
         {
             accounts: {
                 netAuth: netAuth,
@@ -133,7 +159,6 @@ async function main() {
                 { pubkey: swapContractPK, isWritable: false, isSigner: false },
                 { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
                 { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
-                { pubkey: provider.wallet.publicKey, isWritable: false, isSigner: true },
                 { pubkey: swapDataPK, isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },

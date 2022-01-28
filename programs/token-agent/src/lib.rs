@@ -475,6 +475,7 @@ mod token_agent {
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
+            ctx.accounts.merchant_approval.reload()?;
         }
 
         // Create subscription data
@@ -509,6 +510,7 @@ mod token_agent {
         emit!(SubscrEvent {
             event_hash: 176440469768111763486207729736362869784, // solana/program/token-agent/subscribe
             slot: clock.slot,
+            merchant_tx_id: ctx.accounts.merchant_approval.tx_count,
             subscr_data: ctx.accounts.subscr_data.key(),
             subscr_id: inp_subscr_id,
             rebill_event: 0,
@@ -560,6 +562,7 @@ mod token_agent {
             emit!(SubscrEvent {
                 event_hash: 163361025719893016519135760137561968517, // solana/program/token-agent/update_subscription/cancel
                 slot: clock.slot,
+                merchant_tx_id: 0,
                 subscr_data: subscr.key(),
                 subscr_id: subscr.subscr_id,
                 rebill_event: 0,
@@ -811,6 +814,7 @@ mod token_agent {
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
+            ctx.accounts.merchant_approval.reload()?;
         }
 
         // Update subscription data
@@ -838,6 +842,7 @@ mod token_agent {
         emit!(SubscrEvent {
             event_hash: 298296161986799263364555576740275705662, // solana/program/token-agent/update_subscription
             slot: clock.slot,
+            merchant_tx_id: ctx.accounts.merchant_approval.tx_count,
             subscr_data: subscr.key(),
             subscr_id: subscr.subscr_id,
             rebill_event: 0,
@@ -848,6 +853,14 @@ mod token_agent {
             swap: inp_swap,
         });
 
+        Ok(())
+    }
+
+    pub fn close_subscription(ctx: Context<CloseSubscr>) -> ProgramResult {
+        let subscr = &ctx.accounts.subscr_data;
+        verify_matching_accounts(&subscr.user_key, ctx.accounts.user_key.to_account_info().key,
+            Some(String::from("user_key does not match subscription"))
+        )?;
         Ok(())
     }
 
@@ -902,6 +915,7 @@ mod token_agent {
         emit!(SubscrEvent {
             event_hash: 14511983483732720963723889670203659368, // solana/program/token-agent/manager_cancel
             slot: clock.slot,
+            merchant_tx_id: 0,
             subscr_data: subscr.key(),
             subscr_id: subscr.subscr_id,
             rebill_event: 0,
@@ -1037,7 +1051,7 @@ mod token_agent {
             msg!("Invalid negative rebill timestamp");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
-        if ts < inp_rebill_ts && false { // <=== TESTING ONLY !!! REMOVE BEFORE LAUNCH !!!
+        if ts < inp_rebill_ts {
             msg!("Attempted rebill before scheduled time");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
@@ -1162,6 +1176,7 @@ mod token_agent {
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
+            ctx.accounts.merchant_approval.reload()?;
         }
 
         // Update parameters
@@ -1172,6 +1187,7 @@ mod token_agent {
         emit!(SubscrEvent {
             event_hash: 196800858676461937700417377973077375575, // solana/program/token-agent/process
             slot: clock.slot,
+            merchant_tx_id: ctx.accounts.merchant_approval.tx_count,
             subscr_data: subscr.key(),
             subscr_id: subscr.subscr_id,
             rebill_event: subscr.rebill_events,
@@ -1399,12 +1415,16 @@ mod token_agent {
             let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
             //msg!("Atellix: Attempt to record revenue");
             net_authority::cpi::record_revenue(na_ctx, inp_net_nonce, true, net_amount)?;
+            ctx.accounts.merchant_approval.reload()?;
         }
 
         msg!("atellix-log");
         emit!(PaymentEvent {
             event_hash: 43781034894216267743388154650854733336, // solana/program/token-agent/merchant_payment
             slot: clock.slot,
+            merchant_tx_id: ctx.accounts.merchant_approval.tx_count,
+            merchant_key: *ctx.accounts.merchant_key.to_account_info().key,
+            user_key: *ctx.accounts.user_key.to_account_info().key,
             total: inp_amount,
             amount: net_amount,
             fees: fee_amount,
@@ -1894,6 +1914,16 @@ pub struct UpdateSubscr<'info> {
 }
 
 #[derive(Accounts)]
+pub struct CloseSubscr<'info> {
+    #[account(mut, close = fee_recipient)]
+    pub subscr_data: ProgramAccount<'info, SubscrData>,
+    #[account(signer)]
+    pub user_key: AccountInfo<'info>,
+    #[account(signer)]
+    pub fee_recipient: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
 pub struct UpdateManager<'info> {
     #[account(mut)]
     pub subscr_data: ProgramAccount<'info, SubscrData>,
@@ -2087,6 +2117,7 @@ pub struct TokenAllowance {
 pub struct SubscrEvent {
     pub event_hash: u128,
     pub slot: u64,
+    pub merchant_tx_id: u64,
     pub subscr_data: Pubkey,
     pub subscr_id: u64,
     pub rebill_event: u32,
@@ -2101,10 +2132,13 @@ pub struct SubscrEvent {
 pub struct PaymentEvent {
     pub event_hash: u128,
     pub slot: u64,
+    pub merchant_tx_id: u64,
+    pub merchant_key: Pubkey,
+    pub user_key: Pubkey,
+    pub payment_id: u64,
     pub total: u64,
     pub amount: u64,
     pub fees: u64,
-    pub payment_id: u64,
     pub swap: bool,
 }
 
