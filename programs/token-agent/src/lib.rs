@@ -861,6 +861,8 @@ mod token_agent {
         verify_matching_accounts(&subscr.user_key, ctx.accounts.user_key.to_account_info().key,
             Some(String::from("user_key does not match subscription"))
         )?;
+
+        msg!("Closed Subscription: {}", ctx.accounts.subscr_data.to_account_info().key.to_string());
         Ok(())
     }
 
