@@ -2085,6 +2085,7 @@ pub struct UpdateSubscr<'info> {
     #[account(signer)]
     pub user_key: AccountInfo<'info>,
     pub user_agent: AccountInfo<'info>,
+    #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
@@ -2139,6 +2140,7 @@ pub struct ProcessSubscr<'info> {
     pub manager_key: AccountInfo<'info>,
     pub manager_approval: Account<'info, ManagerApproval>,
     pub user_agent: AccountInfo<'info>,
+    #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
@@ -2160,6 +2162,7 @@ pub struct MerchantPayment<'info> {
     pub merchant_token: AccountInfo<'info>,
     #[account(signer)]
     pub user_key: AccountInfo<'info>,
+    #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
@@ -2180,6 +2183,7 @@ pub struct MerchantReceive<'info> {
     #[account(mut)]
     pub merchant_token: AccountInfo<'info>,
     pub user_key: AccountInfo<'info>,
+    #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
@@ -2204,7 +2208,9 @@ pub struct CreateAllowance<'info> {
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
     pub token_account: AccountInfo<'info>,
+    #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
+    #[account(address = system_program::ID)]
     pub system_program: AccountInfo<'info>,
     #[account(signer)]
     pub funder_key: AccountInfo<'info>,
@@ -2221,6 +2227,7 @@ pub struct UpdateAllowance<'info> {
     #[account(mut)]
     pub token_account: AccountInfo<'info>,
     pub token_mint: AccountInfo<'info>,
+    #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
 }
 
@@ -2237,6 +2244,7 @@ pub struct DelegatedTransfer<'info> {
     pub token_mint: AccountInfo<'info>,
     #[account(mut)]
     pub token_recipient: AccountInfo<'info>,
+    #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
 }
 
