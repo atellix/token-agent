@@ -14,25 +14,16 @@ const tokenAgent = anchor.workspace.TokenAgent
 const tokenAgentPK = tokenAgent.programId
 //console.log(tokenAgent)
 
+async function programAddress(inputs, program) {
+    const addr = await PublicKey.findProgramAddress(inputs, program)
+    const res = { 'pubkey': await addr[0].toString(), 'nonce': addr[1] }
+    return res
+}
+
 async function main() {
-    const subscrData = new PublicKey('7Ff34GLefdEE5RRB3f5iM98iA4iEEkKaYf5udVPXyr26')
-
-    var act = await tokenAgent.account.subscrData.fetch(subscrData)
-    console.log('Initial Subscription Data')
-    console.log(act)
-
-    console.log('Close Subscription')
-    let txsig = await tokenAgent.rpc.closeSubscription(
-        {
-            accounts: {
-                //subscrData: new PublicKey('Fxg4sFxmiWFPaxS7Xtgnk4J83grzcky9ZpMd6GyutEPd'),
-                subscrData: subscrData,
-                userKey: provider.wallet.publicKey,
-                feeRecipient: provider.wallet.publicKey,
-            },
-        }
-    )
-    console.log(txsig)
+    var merchantPK = new PublicKey('2cxhShPFPqqPyZngmLEoujX173J6JT1gSHd9wvpATV5r')
+    var drop = await programAddress([merchantPK.toBuffer()], tokenAgentPK)
+    console.log('Merchant Drop: ' + drop.pubkey)
 }
 
 console.log('Begin')
