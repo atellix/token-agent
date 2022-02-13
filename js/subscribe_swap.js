@@ -161,8 +161,8 @@ async function main() {
     const swapFeesTK = new PublicKey(swapSpec.feesToken)
 
     const swapRootData = await programAddress([swapContractPK.toBuffer()], swapContractPK)
-    const tkiData1 = await programAddress([tokenMint1.toBuffer()], swapContractPK)
-    const tkiData2 = await programAddress([tokenMint2.toBuffer()], swapContractPK)
+    const tkiData1 = await programAddress([tokenMint1.toBuffer(), tokenMint2.toBuffer()], swapContractPK)
+    const tkiData2 = await programAddress([tokenMint2.toBuffer(), tokenMint1.toBuffer()], swapContractPK)
     const tokData1 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint1)
     const tokData2 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint2)
 
