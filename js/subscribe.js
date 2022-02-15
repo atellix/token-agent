@@ -124,7 +124,6 @@ async function main() {
         )
     }
 
-    console.log('Fund Account: Subscription 1')
     const tx = new anchor.web3.Transaction()
     tx.add(
         anchor.web3.SystemProgram.createAccount({
@@ -135,7 +134,6 @@ async function main() {
             programId: tokenAgentPK,
         })
     )
-    await provider.send(tx, [subscrData])
 
     var l1 = tokenAgent.addEventListener('SubscrEvent', (evt, slot) => {
         console.log('SubscrEvent - Slot: ' + slot)
@@ -144,11 +142,32 @@ async function main() {
     })
 
     console.log('Subscribe')
+
+    console.log({
+        subscrData: subscrData.publicKey.toString(),
+        netAuth: netAuth.toString(),
+        netRoot: new PublicKey(netRoot.pubkey).toString(),
+        netRbac: netRBAC.toString(),
+        rootKey: new PublicKey(rootKey.pubkey).toString(),
+        merchantKey: merchantPK.toString(),
+        merchantApproval: merchantAP.toString(),
+        merchantToken: new PublicKey(merchantTK.pubkey).toString(),
+        managerKey: managerPK.toString(),
+        managerApproval: managerAP.toString(),
+        userKey: provider.wallet.publicKey.toString(),
+        userAgent: new PublicKey(userAgent.pubkey).toString(),
+        tokenProgram: TOKEN_PROGRAM_ID.toString(),
+        tokenMint: tokenMint.toString(),
+        tokenAccount: tokenAccount.toString(),
+        feesAccount: new PublicKey(feesTK.pubkey).toString(),
+        systemProgram: SystemProgram.programId.toString(),
+    })
+
     var dt0 = DateTime.now().setZone('utc')
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
     var dts0 = dt0.toFormat("yyyyLL")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
-    await tokenAgent.rpc.subscribe(
+    tx.add(tokenAgent.instruction.subscribe(
         true,                                           // link_token
         new anchor.BN(100000),                          // initial_amount
         userAgent.nonce,                                // inp_user_nonce
@@ -160,6 +179,7 @@ async function main() {
         new anchor.BN(10000),                           // inp_budget
         new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_next_rebill
         false,                                          // inp_swap
+        false,                                          // inp_swap_direction
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
@@ -183,11 +203,14 @@ async function main() {
                 tokenMint: tokenMint,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
-            }
+                systemProgram: SystemProgram.programId,
+            },
         }
-    )
+    ))
+    let txid = await provider.send(tx, [subscrData])
+    console.log(txid)
 
-    if (false) {
+    if (true) {
         console.log('Process 1')
 
         console.log({
