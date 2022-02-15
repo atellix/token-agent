@@ -37,7 +37,7 @@ function importSecretKey(keyStr) {
 }
 
 async function main() {
-    const subscrData = new PublicKey('D9s6vgXXBUhdgAKVvPMSjtK2nMUrDbPYtvW4EhhmPfx9')
+    const subscrData = new PublicKey('HwWdBqxZm1i9mz9Ut67XL3vcbvh151wtu2VdXhNXFmgv')
 
     var ndjs
     try {
@@ -58,22 +58,20 @@ async function main() {
 
     var djs
     try {
-        djs = await fs.readFile('../../data/swap-usdv-wsol.json')
+        djs = await fs.readFile('../../data/swap-wsol-usdv.json')
     } catch (error) {
         console.error('File Error: ', error)
     }
     const swapSpec = JSON.parse(djs.toString())
 
     const swapContractPK = new PublicKey(swapCache.swapContractProgram)
-    const tokenMint1 = new PublicKey(swapSpec.tokenMint1)
-    const tokenMint2 = new PublicKey(swapSpec.tokenMint2)
+    const tokenMint1 = new PublicKey(swapSpec.inbMint)
+    const tokenMint2 = new PublicKey(swapSpec.outMint)
     const swapAuthDataPK = new PublicKey(swapCache.swapContractRBAC)
     const swapDataPK = new PublicKey(swapSpec.swapData)
     const swapFeesTK = new PublicKey(swapSpec.feesToken)
 
     const swapRootData = await programAddress([swapContractPK.toBuffer()], swapContractPK)
-    const tkiData1 = await programAddress([tokenMint1.toBuffer()], swapContractPK)
-    const tkiData2 = await programAddress([tokenMint2.toBuffer()], swapContractPK)
     const tokData1 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint1)
     const tokData2 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint2)
 
@@ -114,6 +112,7 @@ async function main() {
         act.active,                                     // inp_active
         true,                                           // inp_link_token
         new anchor.BN(100000),                          // inp_amount
+        new anchor.BN(4444),                            // inp_amount
         userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
@@ -127,7 +126,8 @@ async function main() {
         act.notValidBefore,                             // inp_not_valid_before
         act.notValidAfter,                              // inp_not_valid_after
         act.maxDelay,                                   // inp_max_delay
-        act.swap,                                       // inp_swap
+        true, // act.swap,                              // inp_swap
+        true, // act.swap_direction,                    // inp_swap_direction
         swapRootData.nonce,                             // inp_swap_root_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
@@ -157,9 +157,7 @@ async function main() {
                 { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
                 { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
                 { pubkey: swapDataPK, isWritable: true, isSigner: false },
-                { pubkey: new PublicKey(tkiData1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
-                { pubkey: new PublicKey(tkiData2.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
                 { pubkey: swapFeesTK, isWritable: true, isSigner: false },
                 { pubkey: new PublicKey('DpoK8Zz69APV9ntjuY9C4LZCxANYMV56M2cbXEdkjxME'), isWritable: false, isSigner: false },

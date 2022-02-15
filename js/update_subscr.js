@@ -37,7 +37,7 @@ function importSecretKey(keyStr) {
 }
 
 async function main() {
-    const subscrData = new PublicKey('6ZjraC4VGWd4oY1qTwyE4YqSBy2c2vhHoRV5bpKwF4TN')
+    const subscrData = new PublicKey('HwWdBqxZm1i9mz9Ut67XL3vcbvh151wtu2VdXhNXFmgv')
 
     var ndjs
     try {
@@ -48,6 +48,7 @@ async function main() {
     const netData = JSON.parse(ndjs.toString())
     //console.log(netData)
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
+    const tokenAccount = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
@@ -56,6 +57,7 @@ async function main() {
     const feesTK = await associatedTokenAddress(feesPK, tokenMint)
     const merchantPK = new PublicKey(netData.merchant1)
     const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
+    const merchantToken = await associatedTokenAddress(merchantPK, tokenMint)
     const managerSK = importSecretKey(netData.manager1_secret)
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
@@ -78,6 +80,7 @@ async function main() {
         act.active,                                     // inp_active
         true,                                           // inp_link_token
         new anchor.BN(100000),                          // inp_amount
+        new anchor.BN(3333),                            // inp_payment_id
         userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
@@ -91,14 +94,14 @@ async function main() {
         act.notValidBefore,                             // inp_not_valid_before
         act.notValidAfter,                              // inp_not_valid_after
         act.maxDelay,                                   // inp_max_delay
-        act.swap,                                       // inp_swap
+        false, // act.swap,                             // inp_swap
+        false, // act.swap_direction,                   // inp_swap_direction
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
         0,                                              // inp_swap_dst_nonce
         {
             accounts: {
-                //subscrData: new PublicKey('Fxg4sFxmiWFPaxS7Xtgnk4J83grzcky9ZpMd6GyutEPd'),
                 subscrData: subscrData,
                 netAuth: netAuth,
                 netRoot: new PublicKey(netRoot.pubkey),
@@ -106,14 +109,14 @@ async function main() {
                 rootKey: new PublicKey(rootKey.pubkey),
                 merchantKey: act.merchantKey,
                 merchantApproval: act.merchantApproval,
-                merchantToken: act.merchantToken,
+                merchantToken: new PublicKey(merchantToken.pubkey),
                 managerKey: act.managerKey,
                 managerApproval: act.managerApproval,
                 userKey: act.userKey,
-                userAgent: act.userAgent,
+                userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenMint: act.tokenMint,
-                tokenAccount: act.tokenAccount,
+                tokenAccount: new PublicKey(tokenAccount.pubkey), // act.tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
             }
         }
@@ -140,6 +143,7 @@ async function main() {
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
             new anchor.BN(10000),                           // inp_amount
+            new anchor.BN(38483483),                        // inp_payment_id
             0,                                              // inp_swap_root_nonce
             0,                                              // inp_swap_inb_nonce
             0,                                              // inp_swap_out_nonce
@@ -152,13 +156,13 @@ async function main() {
                     rootKey: new PublicKey(rootKey.pubkey),
                     merchantKey: act.merchantKey,
                     merchantApproval: act.merchantApproval,
-                    merchantToken: act.merchantToken,
+                    merchantToken: new PublicKey(merchantToken.pubkey),
                     managerKey: act.managerKey,
                     managerApproval: act.managerApproval,
-                    userAgent: act.userAgent,
+                    userAgent: new PublicKey(userAgent.pubkey),
                     tokenProgram: TOKEN_PROGRAM_ID,
                     tokenMint: act.tokenMint,
-                    tokenAccount: act.tokenAccount,
+                    tokenAccount: new PublicKey(tokenAccount.pubkey),
                     feesAccount: new PublicKey(feesTK.pubkey),
                 }
             }

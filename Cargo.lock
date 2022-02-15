@@ -1184,6 +1184,7 @@ dependencies = [
  "anchor-spl",
  "byte-slice-cast",
  "bytemuck",
+ "net-authority",
  "num_enum",
  "slab-alloc",
  "solana-program",

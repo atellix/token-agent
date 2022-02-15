@@ -132,10 +132,17 @@ async function main() {
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
         netRoot.nonce,                                  // inp_net_nonce
-        new anchor.BN(0),                               // inp_subscr_id
+        new anchor.BN(777),                             // inp_subscr_id
+        new anchor.BN(888),                             // inp_payment_id
         2,                                              // inp_period (2 = monthly)
         new anchor.BN(10000),                           // inp_budget
+        false,                                          // inp_use_total
+        new anchor.BN(0),                               // inp_total_budget
         new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_next_rebill
+        0,                                              // inp_rebill_max
+        new anchor.BN(0),                               // inp_not_valid_before
+        new anchor.BN(0),                               // inp_not_valid_after
+        new anchor.BN(0),                               // inp_max_delay
         false,                                          // inp_swap
         false,                                          // inp_swap_direction
         0,                                              // inp_swap_root_nonce
@@ -197,6 +204,7 @@ async function main() {
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
             new anchor.BN(10000),                           // inp_amount
+            new anchor.BN(121212),                          // inp_payment_id
             0,                                              // inp_swap_root_nonce
             0,                                              // inp_swap_inb_nonce
             0,                                              // inp_swap_out_nonce
