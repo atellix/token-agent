@@ -82,48 +82,6 @@ async function main() {
 
     const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
-    if (false) {
-        console.log('Fund Token: Merchant')
-        await tokenAgent.rpc.fundToken(
-            merchantTK.nonce,
-            {
-                accounts: {
-                    ascTokenAccount: SPL_ASSOCIATED_TOKEN,
-                },
-                remainingAccounts: [
-                    { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
-                    { pubkey: tokenMint, isWritable: false, isSigner: false },
-                    { pubkey: merchantPK, isWritable: false, isSigner: false },
-                    { pubkey: new PublicKey(merchantTK.pubkey), isWritable: true, isSigner: false },
-                    { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
-                    { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
-                    { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
-                ]
-            }
-        )
-    }
-
-    if (false) {
-        console.log('Fund Token: Fees')
-        await tokenAgent.rpc.fundToken(
-            feesTK.nonce,
-            {
-                accounts: {
-                    ascTokenAccount: SPL_ASSOCIATED_TOKEN,
-                },
-                remainingAccounts: [
-                    { pubkey: provider.wallet.publicKey, isWritable: true, isSigner: true },
-                    { pubkey: tokenMint, isWritable: false, isSigner: false },
-                    { pubkey: feesPK, isWritable: false, isSigner: false },
-                    { pubkey: new PublicKey(feesTK.pubkey), isWritable: true, isSigner: false },
-                    { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
-                    { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
-                    { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
-                ]
-            }
-        )
-    }
-
     var spjs
     try {
         spjs = await fs.readFile('../../data/swap.json')

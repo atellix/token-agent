@@ -116,6 +116,7 @@ async function main() {
         new anchor.BN(1234),                            // inp_payment_id
         new anchor.BN(20 * (10**4)),                    // inp_amount
         false,                                          // inp_swap
+        false,                                          // inp_swap_direction
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce

@@ -15,7 +15,7 @@ const tokenAgentPK = tokenAgent.programId
 //console.log(tokenAgent)
 
 async function main() {
-    const subscrData = new PublicKey('7Ff34GLefdEE5RRB3f5iM98iA4iEEkKaYf5udVPXyr26')
+    const subscrData = new PublicKey('9SmeJPYfufJyGbJQvvLmkEPnDmF5QAA5JqQ79Ltcnf92')
 
     var act = await tokenAgent.account.subscrData.fetch(subscrData)
     console.log('Initial Subscription Data')
