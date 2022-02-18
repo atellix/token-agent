@@ -98,9 +98,12 @@ async function main() {
     const swapDataPK = new PublicKey(swapSpec.swapData)
     const swapFeesTK = new PublicKey(swapSpec.feesToken)
 
-    const swapRootData = await programAddress([swapContractPK.toBuffer()], swapContractPK)
-    const tokData1 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint1)
-    const tokData2 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint2)
+    const swapId = 0
+    var buf = Buffer.alloc(2)
+    buf.writeInt16LE(swapId)
+    const swapData = await programAddress([tokenMint1.toBuffer(), tokenMint2.toBuffer(), buf], swapContractPK)
+    const tokData1 = await associatedTokenAddress(new PublicKey(swapData.pubkey), tokenMint1)
+    const tokData2 = await associatedTokenAddress(new PublicKey(swapData.pubkey), tokenMint2)
 
     const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
 
@@ -129,12 +132,12 @@ async function main() {
     let apires = await tokenAgent.rpc.merchantPayment(
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
-        netRoot.nonce,                                  // inp_net_nonce
         new anchor.BN(12345),                           // inp_payment_id
         new anchor.BN(20 * (10**4)),                    // inp_amount
         true,                                           // inp_swap
         true,                                           // inp_swap_direction
-        swapRootData.nonce,                             // inp_swap_root_nonce
+        0,                                              // inp_swap_mode: 0 = AtxSwapContractV1
+        swapData.nonce,                                 // inp_swap_data_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
         agentToken.nonce,                               // inp_swap_dst_nonce
@@ -142,7 +145,6 @@ async function main() {
             accounts: {
                 netAuth: netAuth,
                 netRoot: new PublicKey(netRoot.pubkey),
-                netRbac: netRBAC,
                 rootKey: new PublicKey(rootKey.pubkey),
                 merchantKey: merchantPK,
                 merchantApproval: merchantAP,
@@ -156,9 +158,7 @@ async function main() {
             remainingAccounts: [
                 { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: swapContractPK, isWritable: false, isSigner: false },
-                { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
-                { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
-                { pubkey: swapDataPK, isWritable: true, isSigner: false },
+                { pubkey: new PublicKey(swapData.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
                 { pubkey: swapFeesTK, isWritable: true, isSigner: false },

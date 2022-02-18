@@ -44,8 +44,8 @@ pub fn get_period_string(ts: i64, period: SubscriptionPeriod) -> FnResult<String
 
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
-pub enum SwapProvider {
-    AtellixSwapContractV1,
+pub enum SwapMode {
+    AtxSwapContractV1,
 }
 
 fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<String>) -> ProgramResult {
@@ -129,6 +129,7 @@ mod token_agent {
         inp_max_delay: i64,
         inp_swap: bool,
         inp_swap_direction: bool,
+        inp_swap_mode: u8,
         inp_swap_data_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
@@ -300,24 +301,31 @@ mod token_agent {
                     return Err(ErrorCode::InvalidDerivedAccount.into());
                 }
 
-                //msg!("Atellix: Attempt swap");
-                swap_account = acc_swap_token.key();
-                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
-                let sw_accounts = Swap {
-                    swap_user: ctx.accounts.user_key.to_account_info(),
-                    swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
-                    inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token agent swap destination
-                    fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    token_program: ctx.accounts.token_program.to_account_info(),
-                };
-                let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
-                if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                let swap_mode = SwapMode::try_from_primitive(inp_swap_mode);
+                if swap_mode.is_err() {
+                    msg!("Invalid swap mode");
+                    return Err(ErrorCode::InvalidSwapMode.into());
                 }
-                swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, true, inp_initial_amount)?;
+                if swap_mode.unwrap() == SwapMode::AtxSwapContractV1 {
+                    //msg!("Atellix: Attempt swap");
+                    swap_account = acc_swap_token.key();
+                    let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                    let sw_accounts = Swap {
+                        swap_user: ctx.accounts.user_key.to_account_info(),
+                        swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                        inb_token_src: acc_swap_token.clone(),
+                        inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
+                        out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
+                        out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token agent swap destination
+                        fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
+                        token_program: ctx.accounts.token_program.to_account_info(),
+                    };
+                    let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
+                    if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
+                        sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                    }
+                    swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, true, inp_initial_amount)?;
+                }
             }
 
             // Transfer tokens
@@ -398,6 +406,7 @@ mod token_agent {
         subscr.total_budget = inp_total_budget;
         subscr.swap = inp_swap;
         subscr.swap_direction = inp_swap_direction;
+        subscr.swap_mode = inp_swap_mode;
         store_struct::<SubscrData>(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
         msg!("atellix-log");
@@ -438,6 +447,7 @@ mod token_agent {
         inp_max_delay: i64,
         inp_swap: bool,
         inp_swap_direction: bool,
+        inp_swap_mode: u8,
         inp_swap_data_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
@@ -627,23 +637,30 @@ mod token_agent {
                     msg!("Invalid swap destination token account");
                     return Err(ErrorCode::InvalidDerivedAccount.into());
                 }
-                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
-                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
-                let sw_accounts = Swap {
-                    swap_user: ctx.accounts.user_key.to_account_info(),
-                    swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
-                    inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
-                    fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    token_program: ctx.accounts.token_program.to_account_info(),
-                };
-                let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
-                if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                let swap_mode = SwapMode::try_from_primitive(inp_swap_mode);
+                if swap_mode.is_err() {
+                    msg!("Invalid swap mode");
+                    return Err(ErrorCode::InvalidSwapMode.into());
                 }
-                swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, true, inp_amount)?;
+                if swap_mode.unwrap() == SwapMode::AtxSwapContractV1 {
+                    let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                    let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                    let sw_accounts = Swap {
+                        swap_user: ctx.accounts.user_key.to_account_info(),
+                        swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                        inb_token_src: acc_swap_token.clone(),
+                        inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
+                        out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
+                        out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
+                        fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
+                        token_program: ctx.accounts.token_program.to_account_info(),
+                    };
+                    let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
+                    if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
+                        sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                    }
+                    swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, true, inp_amount)?;
+                }
             }
 
             let user_pda_seeds = &[subscr.user_key.as_ref(), &[inp_user_nonce]];
@@ -720,6 +737,7 @@ mod token_agent {
         subscr.total_budget = inp_total_budget;
         subscr.swap = inp_swap;
         subscr.swap_direction = inp_swap_direction;
+        subscr.swap_mode = inp_swap_mode;
 
         msg!("atellix-log");
         emit!(SubscrEvent {
@@ -963,26 +981,33 @@ mod token_agent {
             let user_pda_signer = &[&user_pda_seeds[..]];
             if subscr.swap {
                 //msg!("Atellix: Attempt swap");
-                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
-                verify_matching_accounts(&subscr.swap_account, &acc_swap_token.key(),
-                    Some(String::from("Swap token does not match subscription"))
-                )?;
-                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
-                let sw_accounts = Swap {
-                    swap_user: ctx.accounts.user_agent.to_account_info(),          // User Agent (signer)
-                    swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
-                    inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
-                    fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    token_program: ctx.accounts.token_program.to_account_info(),
-                };
-                let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, user_pda_signer);
-                if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                let swap_mode = SwapMode::try_from_primitive(subscr.swap_mode);
+                if swap_mode.is_err() {
+                    msg!("Invalid swap mode");
+                    return Err(ErrorCode::InvalidSwapMode.into());
                 }
-                swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, subscr.swap_direction, false, true, inp_amount)?;
+                if swap_mode.unwrap() == SwapMode::AtxSwapContractV1 {
+                    let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                    verify_matching_accounts(&subscr.swap_account, &acc_swap_token.key(),
+                        Some(String::from("Swap token does not match subscription"))
+                    )?;
+                    let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                    let sw_accounts = Swap {
+                        swap_user: ctx.accounts.user_agent.to_account_info(),          // User Agent (signer)
+                        swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                        inb_token_src: acc_swap_token.clone(),
+                        inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
+                        out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
+                        out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
+                        fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
+                        token_program: ctx.accounts.token_program.to_account_info(),
+                    };
+                    let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, user_pda_signer);
+                    if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
+                        sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                    }
+                    swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, subscr.swap_direction, false, true, inp_amount)?;
+                }
             }
             let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
             let root_pda_signer = &[&root_pda_seeds[..]];
@@ -1066,6 +1091,7 @@ mod token_agent {
         inp_amount: u64,
         inp_swap: bool,
         inp_swap_direction: bool,
+        inp_swap_mode: u8,
         inp_swap_data_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
@@ -1125,23 +1151,30 @@ mod token_agent {
                     msg!("Invalid swap destination token account");
                     return Err(ErrorCode::InvalidDerivedAccount.into());
                 }
-                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
-                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
-                let sw_accounts = Swap {
-                    swap_user: ctx.accounts.user_key.to_account_info(),
-                    swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
-                    inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
-                    fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    token_program: ctx.accounts.token_program.to_account_info(),
-                };
-                let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
-                if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                let swap_mode = SwapMode::try_from_primitive(inp_swap_mode);
+                if swap_mode.is_err() {
+                    msg!("Invalid swap mode");
+                    return Err(ErrorCode::InvalidSwapMode.into());
                 }
-                swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, true, inp_amount)?;
+                if swap_mode.unwrap() == SwapMode::AtxSwapContractV1 {
+                    let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                    let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                    let sw_accounts = Swap {
+                        swap_user: ctx.accounts.user_key.to_account_info(),
+                        swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                        inb_token_src: acc_swap_token.clone(),
+                        inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
+                        out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
+                        out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
+                        fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
+                        token_program: ctx.accounts.token_program.to_account_info(),
+                    };
+                    let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
+                    if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
+                        sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                    }
+                    swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, true, inp_amount)?;
+                }
             }
 
             // Transfer tokens
@@ -1229,6 +1262,7 @@ mod token_agent {
         inp_amount: u64,
         inp_swap: bool,
         inp_swap_direction: bool,
+        inp_swap_mode: u8,
         inp_swap_data_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
@@ -1288,23 +1322,30 @@ mod token_agent {
                     msg!("Invalid swap destination token account");
                     return Err(ErrorCode::InvalidDerivedAccount.into());
                 }
-                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
-                let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
-                let sw_accounts = Swap {
-                    swap_user: ctx.accounts.merchant_approval.to_account_info(),
-                    swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
-                    inb_token_src: acc_swap_token.clone(),
-                    inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
-                    out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
-                    out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
-                    fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
-                    token_program: ctx.accounts.token_program.to_account_info(),
-                };
-                let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
-                if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
-                    sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                let swap_mode = SwapMode::try_from_primitive(inp_swap_mode);
+                if swap_mode.is_err() {
+                    msg!("Invalid swap mode");
+                    return Err(ErrorCode::InvalidSwapMode.into());
                 }
-                swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, false, inp_amount)?;
+                if swap_mode.unwrap() == SwapMode::AtxSwapContractV1 {
+                    let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                    let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
+                    let sw_accounts = Swap {
+                        swap_user: ctx.accounts.merchant_approval.to_account_info(),
+                        swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
+                        inb_token_src: acc_swap_token.clone(),
+                        inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
+                        out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
+                        out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
+                        fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
+                        token_program: ctx.accounts.token_program.to_account_info(),
+                    };
+                    let mut sw_ctx = CpiContext::new(sw_program, sw_accounts);
+                    if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
+                        sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                    }
+                    swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, inp_swap_direction, false, false, inp_amount)?;
+                }
             }
 
             // Transfer tokens
@@ -2016,6 +2057,7 @@ pub struct SubscrData {
     pub active: bool,                   // Subscription is active
     pub swap: bool,                     // Swap tokens before payment
     pub swap_direction: bool,           // Swap direction
+    pub swap_mode: u8,                  // Swap mode
 }
 
 impl Default for SubscrData {
@@ -2044,6 +2086,7 @@ impl Default for SubscrData {
             active: true,
             swap: false,
             swap_direction: true,
+            swap_mode: 0,
         }
     }
 }
@@ -2119,7 +2162,7 @@ pub enum ErrorCode {
     #[msg("Invalid timeframe")]
     InvalidTimeframe,
     #[msg("Invalid data type")]
-    InvalidDataType,
+    InvalidSwapMode,
     #[msg("Invalid account")]
     InvalidAccount,
     #[msg("Invalid nonce")]

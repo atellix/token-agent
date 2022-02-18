@@ -105,7 +105,10 @@ async function main() {
     const swapDataPK = new PublicKey(swapSpec.swapData)
     const swapFeesTK = new PublicKey(swapSpec.feesToken)
 
-    const swapData = await programAddress([tokenMint1.toBuffer(), tokenMint2.toBuffer()], swapContractPK)
+    const swapId = 0
+    var buf = Buffer.alloc(2)
+    buf.writeInt16LE(swapId)
+    const swapData = await programAddress([tokenMint1.toBuffer(), tokenMint2.toBuffer(), buf], swapContractPK)
     const tokData1 = await associatedTokenAddress(new PublicKey(swapData.pubkey), tokenMint1)
     const tokData2 = await associatedTokenAddress(new PublicKey(swapData.pubkey), tokenMint2)
 
@@ -132,6 +135,7 @@ async function main() {
         tokenProgram: TOKEN_PROGRAM_ID.toString(),
         tokenAccount: tokenAccount.toString(),
         feesAccount: new PublicKey(feesTK.pubkey).toString(),
+        swapData: new PublicKey(swapData.pubkey).toString(),
     })
 
     const tx = new anchor.web3.Transaction()
@@ -161,6 +165,7 @@ async function main() {
         new anchor.BN(0),                               // inp_max_delay
         true,                                           // inp_swap
         true,                                           // inp_swap_direction
+        0,                                              // inp_swap_mode: 0 = AtxSwapContractV1
         swapData.nonce,                                 // inp_swap_data_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
