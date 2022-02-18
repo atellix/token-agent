@@ -105,9 +105,9 @@ async function main() {
     const swapDataPK = new PublicKey(swapSpec.swapData)
     const swapFeesTK = new PublicKey(swapSpec.feesToken)
 
-    const swapRootData = await programAddress([swapContractPK.toBuffer()], swapContractPK)
-    const tokData1 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint1)
-    const tokData2 = await associatedTokenAddress(new PublicKey(swapRootData.pubkey), tokenMint2)
+    const swapData = await programAddress([tokenMint1.toBuffer(), tokenMint2.toBuffer()], swapContractPK)
+    const tokData1 = await associatedTokenAddress(new PublicKey(swapData.pubkey), tokenMint1)
+    const tokData2 = await associatedTokenAddress(new PublicKey(swapData.pubkey), tokenMint2)
 
     const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
 
@@ -119,6 +119,20 @@ async function main() {
     dt0 = dt0.minus({ days: dt0.day - 1, hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ months: 1 })
     var dts0 = dt0.toFormat("yyyyLL")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
+
+    console.log({
+        subscrData: subscrData.publicKey.toString(),
+        netAuth: netAuth.toString(),
+        rootKey: new PublicKey(rootKey.pubkey).toString(),
+        merchantApproval: merchantAP.toString(),
+        merchantToken: new PublicKey(merchantTK.pubkey).toString(),
+        managerApproval: managerAP.toString(),
+        userKey: provider.wallet.publicKey.toString(),
+        userAgent: new PublicKey(userAgent.pubkey).toString(),
+        tokenProgram: TOKEN_PROGRAM_ID.toString(),
+        tokenAccount: tokenAccount.toString(),
+        feesAccount: new PublicKey(feesTK.pubkey).toString(),
+    })
 
     const tx = new anchor.web3.Transaction()
     tx.add(anchor.web3.SystemProgram.createAccount({
@@ -134,7 +148,6 @@ async function main() {
         userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
-        netRoot.nonce,                                  // inp_net_nonce
         new anchor.BN(777),                             // inp_subscr_id
         new anchor.BN(888),                             // inp_payment_id
         2,                                              // inp_period (2 = monthly)
@@ -148,7 +161,7 @@ async function main() {
         new anchor.BN(0),                               // inp_max_delay
         true,                                           // inp_swap
         true,                                           // inp_swap_direction
-        swapRootData.nonce,                             // inp_swap_root_nonce
+        swapData.nonce,                                 // inp_swap_data_nonce
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
         agentToken.nonce,                               // inp_swap_dst_nonce
@@ -156,26 +169,19 @@ async function main() {
             accounts: {
                 subscrData: subscrData.publicKey,
                 netAuth: netAuth,
-                netRoot: new PublicKey(netRoot.pubkey),
-                netRbac: netRBAC,
                 rootKey: new PublicKey(rootKey.pubkey),
-                merchantKey: merchantPK,
                 merchantApproval: merchantAP,
                 merchantToken: new PublicKey(merchantTK.pubkey),
-                managerKey: managerPK,
                 managerApproval: managerAP,
                 userKey: provider.wallet.publicKey,
                 userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
-                tokenMint: tokenMint,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
             },
             remainingAccounts: [
                 { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: swapContractPK, isWritable: false, isSigner: false },
-                { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
-                { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
                 { pubkey: swapDataPK, isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
@@ -212,38 +218,31 @@ async function main() {
             userAgent.nonce,                                // inp_user_nonce
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
             rootKey.nonce,                                  // inp_root_nonce
-            netRoot.nonce,                                  // inp_net_nonce
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
             new anchor.BN(100000),                          // inp_amount
             new anchor.BN(5757575),                         // inp_payment_id
-            swapRootData.nonce,                             // inp_swap_root_nonce
+            swapData.nonce,                                 // inp_swap_data_nonce
             tokData1.nonce,                                 // inp_swap_inb_nonce
             tokData2.nonce,                                 // inp_swap_out_nonce
             {
                 accounts: {
                     subscrData: subscrData.publicKey,
                     netAuth: netAuth,
-                    netRoot: new PublicKey(netRoot.pubkey),
-                    netRbac: netRBAC,
                     rootKey: new PublicKey(rootKey.pubkey),
-                    merchantKey: merchantPK,
                     merchantApproval: merchantAP,
                     merchantToken: new PublicKey(merchantTK.pubkey),
                     managerKey: managerPK,
                     managerApproval: managerAP,
                     userAgent: new PublicKey(userAgent.pubkey),
                     tokenProgram: TOKEN_PROGRAM_ID,
-                    tokenMint: tokenMint,
                     tokenAccount: tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),
                 },
                 remainingAccounts: [
                     { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
                     { pubkey: swapContractPK, isWritable: false, isSigner: false },
-                    { pubkey: new PublicKey(swapRootData.pubkey), isWritable: false, isSigner: false },
-                    { pubkey: swapAuthDataPK, isWritable: false, isSigner: false },
                     { pubkey: swapDataPK, isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },

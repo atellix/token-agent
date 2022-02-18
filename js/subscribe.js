@@ -104,18 +104,13 @@ async function main() {
     console.log({
         subscrData: subscrData.publicKey.toString(),
         netAuth: netAuth.toString(),
-        netRoot: new PublicKey(netRoot.pubkey).toString(),
-        netRbac: netRBAC.toString(),
         rootKey: new PublicKey(rootKey.pubkey).toString(),
-        merchantKey: merchantPK.toString(),
         merchantApproval: merchantAP.toString(),
         merchantToken: new PublicKey(merchantTK.pubkey).toString(),
-        managerKey: managerPK.toString(),
         managerApproval: managerAP.toString(),
         userKey: provider.wallet.publicKey.toString(),
         userAgent: new PublicKey(userAgent.pubkey).toString(),
         tokenProgram: TOKEN_PROGRAM_ID.toString(),
-        tokenMint: tokenMint.toString(),
         tokenAccount: tokenAccount.toString(),
         feesAccount: new PublicKey(feesTK.pubkey).toString(),
         systemProgram: SystemProgram.programId.toString(),
@@ -131,7 +126,6 @@ async function main() {
         userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
-        netRoot.nonce,                                  // inp_net_nonce
         new anchor.BN(777),                             // inp_subscr_id
         new anchor.BN(888),                             // inp_payment_id
         2,                                              // inp_period (2 = monthly)
@@ -151,21 +145,15 @@ async function main() {
         0,                                              // inp_swap_dst_nonce
         {
             accounts: {
-                //subscrData: new PublicKey('Fxg4sFxmiWFPaxS7Xtgnk4J83grzcky9ZpMd6GyutEPd'),
                 subscrData: subscrData.publicKey,
                 netAuth: netAuth,
-                netRoot: new PublicKey(netRoot.pubkey),
-                netRbac: netRBAC,
                 rootKey: new PublicKey(rootKey.pubkey),
-                merchantKey: merchantPK,
                 merchantApproval: merchantAP,
                 merchantToken: new PublicKey(merchantTK.pubkey),
-                managerKey: managerPK,
                 managerApproval: managerAP,
                 userKey: provider.wallet.publicKey,
                 userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
-                tokenMint: tokenMint,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
                 systemProgram: SystemProgram.programId,
@@ -199,7 +187,6 @@ async function main() {
             userAgent.nonce,                                // inp_user_nonce
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
             rootKey.nonce,                                  // inp_root_nonce
-            netRoot.nonce,                                  // inp_net_nonce
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
@@ -212,23 +199,19 @@ async function main() {
                 accounts: {
                     subscrData: subscrData.publicKey,
                     netAuth: netAuth,
-                    netRoot: new PublicKey(netRoot.pubkey),
-                    netRbac: netRBAC,
                     rootKey: new PublicKey(rootKey.pubkey),
-                    merchantKey: merchantPK,
                     merchantApproval: merchantAP,
                     merchantToken: new PublicKey(merchantTK.pubkey),
                     managerKey: managerPK,
                     managerApproval: managerAP,
                     userAgent: new PublicKey(userAgent.pubkey),
                     tokenProgram: TOKEN_PROGRAM_ID,
-                    tokenMint: tokenMint,
                     tokenAccount: tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),
                 }
             }
         )
-        await provider.send(tx3, [managerSK])
+        console.log(await provider.send(tx3, [managerSK]))
 
         /* console.log('Process 2')
         eventId = uuidv4()
