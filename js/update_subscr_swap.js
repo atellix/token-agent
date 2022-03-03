@@ -90,7 +90,6 @@ async function main() {
     const merchantPK = new PublicKey(netData.merchant1)
     const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
     const managerSK = importSecretKey(netData.manager1_secret)
-    const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
     const agentToken = await associatedTokenAddress(new PublicKey(rootKey.pubkey), tokenMint)
     const tokenAccount = new PublicKey(agentToken.pubkey)
@@ -116,7 +115,6 @@ async function main() {
         true,                                           // inp_link_token
         new anchor.BN(100000),                          // inp_amount
         new anchor.BN(4444),                            // inp_payment_id
-        userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
         act.period,                                     // inp_period (2 = monthly)
@@ -144,7 +142,6 @@ async function main() {
                 merchantToken: new PublicKey(merchantTK.pubkey),
                 managerApproval: act.managerApproval,
                 userKey: act.userKey,
-                userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenMint: act.tokenMint,
                 tokenAccount: tokenAccount,
@@ -175,7 +172,6 @@ async function main() {
         console.log('Current Rebill: ' + dts0 + ' (' + Math.floor(dt0.toSeconds()) + ')')
         console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO() + ' (' + Math.floor(dt1.toSeconds()) + ')')
         const tx3 = await tokenAgent.transaction.process(
-            userAgent.nonce,                                // inp_user_nonce
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
             rootKey.nonce,                                  // inp_root_nonce
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
@@ -195,7 +191,6 @@ async function main() {
                     merchantToken: new PublicKey(merchantTK.pubkey),
                     managerKey: managerSK.publicKey,
                     managerApproval: act.managerApproval,
-                    userAgent: new PublicKey(userAgent.pubkey),
                     tokenProgram: TOKEN_PROGRAM_ID,
                     tokenAccount: act.tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),

@@ -23,10 +23,9 @@ async function programAddress(inputs, program) {
 
 async function main() {
     var root = await programAddress([tokenAgentPK.toBuffer()], tokenAgentPK)
-    console.log('Program Root: ' + root.pubkey)
+    console.log(root.pubkey)
 }
 
-console.log('Begin')
-main().then(() => console.log('Success')).catch(error => {
+main().then(() => process.exit(0)).catch(error => {
     console.log(error)
 })

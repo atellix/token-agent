@@ -59,7 +59,6 @@ async function main() {
     const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
     const merchantToken = await associatedTokenAddress(merchantPK, tokenMint)
     const managerSK = importSecretKey(netData.manager1_secret)
-    const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
 
     var act = await tokenAgent.account.subscrData.fetch(subscrData)
     console.log('Initial Subscription Data')
@@ -81,7 +80,6 @@ async function main() {
         true,                                           // inp_link_token
         new anchor.BN(100000),                          // inp_amount
         new anchor.BN(3333),                            // inp_payment_id
-        userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
         netRoot.nonce,                                  // inp_net_nonce
@@ -96,6 +94,7 @@ async function main() {
         act.maxDelay,                                   // inp_max_delay
         false, // act.swap,                             // inp_swap
         false, // act.swap_direction,                   // inp_swap_direction
+        0,                                              // inp_swap_mode
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
@@ -113,7 +112,6 @@ async function main() {
                 managerKey: act.managerKey,
                 managerApproval: act.managerApproval,
                 userKey: act.userKey,
-                userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenMint: act.tokenMint,
                 tokenAccount: new PublicKey(tokenAccount.pubkey), // act.tokenAccount,
@@ -135,7 +133,6 @@ async function main() {
         console.log('Current Rebill: ' + dts0 + ' (' + Math.floor(dt0.toSeconds()) + ')')
         console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO() + ' (' + Math.floor(dt1.toSeconds()) + ')')
         const tx3 = await tokenAgent.transaction.process(
-            userAgent.nonce,                                // inp_user_nonce
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
             rootKey.nonce,                                  // inp_root_nonce
             netRoot.nonce,                                  // inp_net_nonce
@@ -159,7 +156,6 @@ async function main() {
                     merchantToken: new PublicKey(merchantToken.pubkey),
                     managerKey: act.managerKey,
                     managerApproval: act.managerApproval,
-                    userAgent: new PublicKey(userAgent.pubkey),
                     tokenProgram: TOKEN_PROGRAM_ID,
                     tokenMint: act.tokenMint,
                     tokenAccount: new PublicKey(tokenAccount.pubkey),

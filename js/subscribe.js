@@ -80,8 +80,6 @@ async function main() {
     console.log('Merchant Token: ' + merchantTK.pubkey)
     console.log('Subscription Data: ' + subscrData.publicKey.toString())
 
-    const userAgent = await programAddress([provider.wallet.publicKey.toBuffer()])
-
     const tx = new anchor.web3.Transaction()
     tx.add(
         anchor.web3.SystemProgram.createAccount({
@@ -109,7 +107,6 @@ async function main() {
         merchantToken: new PublicKey(merchantTK.pubkey).toString(),
         managerApproval: managerAP.toString(),
         userKey: provider.wallet.publicKey.toString(),
-        userAgent: new PublicKey(userAgent.pubkey).toString(),
         tokenProgram: TOKEN_PROGRAM_ID.toString(),
         tokenAccount: tokenAccount.toString(),
         feesAccount: new PublicKey(feesTK.pubkey).toString(),
@@ -123,7 +120,6 @@ async function main() {
     tx.add(tokenAgent.instruction.subscribe(
         true,                                           // link_token
         new anchor.BN(100000),                          // initial_amount
-        userAgent.nonce,                                // inp_user_nonce
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
         new anchor.BN(777),                             // inp_subscr_id
@@ -139,6 +135,7 @@ async function main() {
         new anchor.BN(0),                               // inp_max_delay
         false,                                          // inp_swap
         false,                                          // inp_swap_direction
+        0,                                              // inp_swap_mode
         0,                                              // inp_swap_root_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
@@ -152,7 +149,6 @@ async function main() {
                 merchantToken: new PublicKey(merchantTK.pubkey),
                 managerApproval: managerAP,
                 userKey: provider.wallet.publicKey,
-                userAgent: new PublicKey(userAgent.pubkey),
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
@@ -173,7 +169,6 @@ async function main() {
             merchantToken: new PublicKey(merchantTK.pubkey).toString(),
             managerKey: managerPK.toString(),
             managerApproval: managerAP.toString(),
-            userAgent: new PublicKey(userAgent.pubkey).toString(),
             tokenProgram: TOKEN_PROGRAM_ID.toString(),
             tokenMint: tokenMint.toString(),
             tokenAccount: tokenAccount.toString(),
@@ -184,7 +179,6 @@ async function main() {
         var dts1 = dt1.toFormat("yyyyLL")
         console.log('Next Rebill: ' + dts1 + ' - ' + dt1.toISO())
         const tx3 = await tokenAgent.transaction.process(
-            userAgent.nonce,                                // inp_user_nonce
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
             rootKey.nonce,                                  // inp_root_nonce
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
@@ -204,7 +198,6 @@ async function main() {
                     merchantToken: new PublicKey(merchantTK.pubkey),
                     managerKey: managerPK,
                     managerApproval: managerAP,
-                    userAgent: new PublicKey(userAgent.pubkey),
                     tokenProgram: TOKEN_PROGRAM_ID,
                     tokenAccount: tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),

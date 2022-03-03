@@ -29,9 +29,6 @@ async function main() {
 
     console.log('Create Metadata')
     await tokenAgent.rpc.storeMetadata(
-        true,
-        new anchor.BN(infoBytes),
-        new anchor.BN(infoRent),
         "Token Agent",
         "Atellix Network",
         "https://atellix.network/",
