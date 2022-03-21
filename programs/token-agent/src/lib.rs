@@ -1425,19 +1425,26 @@ mod token_agent {
         tka.not_valid_after = inp_not_valid_after;
         tka.amount = inp_amount;
 
+        msg!("Allowance: {}", inp_amount.to_string());
+
         Ok(())
     }
-/*
+
     pub fn update_allowance(ctx: Context<UpdateAllowance>,
-        link_token: bool,
-        inp_user_nonce: u8,
-        inp_allowance_nonce: u8,
+        inp_link_token: bool,
+        _inp_root_nonce: u8,
+        _inp_allowance_nonce: u8,
         inp_amount: u64,
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
     ) -> ProgramResult {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
+
+        let ald = &ctx.accounts.allowance_data;
+        verify_matching_accounts(&ald.user_key, ctx.accounts.user_key.to_account_info().key,
+            Some(String::from("Invalid user key"))
+        )?;
 
         // Validate input
         if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
@@ -1455,76 +1462,14 @@ mod token_agent {
             }
         }
 
-        // Verfiy allowance program derived address
-        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
-        let derived_allowance_key: Pubkey;
-        if ctx.remaining_accounts.len() > 0 {
-            derived_allowance_key = Pubkey::create_program_address(
-                &[
-                    &ctx.accounts.user_key.to_account_info().key.to_bytes(),
-                    &spl_token.to_bytes(),
-                    &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
-                    &ctx.accounts.token_account.to_account_info().key.to_bytes(),
-                    &ctx.accounts.delegate_key.to_account_info().key.to_bytes(),
-                    &ctx.remaining_accounts.get(0).unwrap().key.to_bytes(),
-                    &[inp_allowance_nonce]
-                ],
-                ctx.program_id
-            ).map_err(|_| ErrorCode::InvalidNonce)?;
-        } else {
-            derived_allowance_key = Pubkey::create_program_address(
-                &[
-                    &ctx.accounts.user_key.to_account_info().key.to_bytes(),
-                    &spl_token.to_bytes(),
-                    &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
-                    &ctx.accounts.token_account.to_account_info().key.to_bytes(),
-                    &ctx.accounts.delegate_key.to_account_info().key.to_bytes(),
-                    &[inp_allowance_nonce]
-                ],
-                ctx.program_id
-            ).map_err(|_| ErrorCode::InvalidNonce)?;
-        }
-        if derived_allowance_key != *ctx.accounts.allowance_data.to_account_info().key {
-            msg!("Invalid allowance account");
-            return Err(ErrorCode::InvalidDerivedAccount.into());
-        }
-
-        // Verify user's program derived account
-        let derived_user_key = Pubkey::create_program_address(
-            &[
-                &ctx.accounts.user_key.to_account_info().key.to_bytes(),
-                &[inp_user_nonce]
-            ],
-            ctx.program_id
-        ).map_err(|_| ErrorCode::InvalidNonce)?;
-        if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
-            msg!("Invalid allowance account");
-            return Err(ErrorCode::InvalidDerivedAccount.into());
-        }
-
-        // Verify accounts match
-        let ald = &mut ctx.accounts.allowance_data;
-        if ald.user_key != *ctx.accounts.user_key.to_account_info().key {
-            msg!("Invalid user account");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if ald.token_account != *ctx.accounts.token_account.to_account_info().key {
-            msg!("Invalid token account");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if ald.token_mint != *ctx.accounts.token_mint.to_account_info().key {
-            msg!("Invalid token mint account");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-
         // Setup up token delegate if needed
-        if link_token {
+        if inp_link_token {
             let cpi_accounts = Approve {
                 to: ctx.accounts.token_account.to_account_info(),
-                delegate: ctx.accounts.user_agent.to_account_info(),
+                delegate: ctx.accounts.root_key.to_account_info(),
                 authority: ctx.accounts.user_key.to_account_info(),
             };
-            let cpi_program = ctx.accounts.token_program.clone();
+            let cpi_program = ctx.accounts.token_program.to_account_info();
             let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
             token::approve(cpi_ctx, u64::MAX)?;
         }
@@ -1534,94 +1479,25 @@ mod token_agent {
         tka.not_valid_after = inp_not_valid_after;
         tka.amount = inp_amount;
 
+        msg!("Allowance: {}", inp_amount.to_string());
+
         Ok(())
     }
 
     pub fn delegated_transfer(ctx: Context<DelegatedTransfer>,
-        inp_user_nonce: u8,
-        inp_allowance_nonce: u8,
+        inp_root_nonce: u8,
+        _inp_allowance_nonce: u8,
         inp_amount: u64,
     ) -> ProgramResult {
-        // Verfiy allowance program derived address
-        let spl_token: Pubkey = Pubkey::from_str(SPL_TOKEN).unwrap();
-        let derived_allowance_key: Pubkey;
-        if ctx.accounts.allowance_data.recipient_key.is_some() {
-            derived_allowance_key = Pubkey::create_program_address(
-                &[
-                    &ctx.accounts.user_key.to_account_info().key.to_bytes(),
-                    &spl_token.to_bytes(),
-                    &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
-                    &ctx.accounts.user_token.to_account_info().key.to_bytes(),
-                    &ctx.accounts.delegate_key.to_account_info().key.to_bytes(),
-                    &ctx.accounts.token_recipient.to_account_info().key.to_bytes(),
-                    &[inp_allowance_nonce]
-                ],
-                ctx.program_id
-            ).map_err(|_| ErrorCode::InvalidNonce)?;
-        } else {
-            derived_allowance_key = Pubkey::create_program_address(
-                &[
-                    &ctx.accounts.user_key.to_account_info().key.to_bytes(),
-                    &spl_token.to_bytes(),
-                    &ctx.accounts.token_mint.to_account_info().key.to_bytes(),
-                    &ctx.accounts.user_token.to_account_info().key.to_bytes(),
-                    &ctx.accounts.delegate_key.to_account_info().key.to_bytes(),
-                    &[inp_allowance_nonce]
-                ],
-                ctx.program_id
-            ).map_err(|_| ErrorCode::InvalidNonce)?;
-        }
-        if derived_allowance_key != *ctx.accounts.allowance_data.to_account_info().key {
-            msg!("Invalid allowance account");
-            return Err(ErrorCode::InvalidDerivedAccount.into());
-        }
-
-        // Verify user's program derived account
-        let derived_user_key = Pubkey::create_program_address(
-            &[
-                &ctx.accounts.user_key.to_account_info().key.to_bytes(),
-                &[inp_user_nonce]
-            ],
-            ctx.program_id
-        ).map_err(|_| ErrorCode::InvalidNonce)?;
-        if derived_user_key != *ctx.accounts.user_agent.to_account_info().key {
-            msg!("Invalid allowance account");
-            return Err(ErrorCode::InvalidDerivedAccount.into());
-        }
-
         let ald = &mut ctx.accounts.allowance_data;
 
-        // Verify accounts match
-        if ald.user_key != *ctx.accounts.user_key.to_account_info().key {
-            msg!("Invalid user account");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if ald.user_agent != *ctx.accounts.user_agent.to_account_info().key {
-            msg!("Invalid user agent account");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if ald.delegate_key != *ctx.accounts.delegate_key.to_account_info().key {
-            let right: Pubkey = *ctx.accounts.delegate_key.to_account_info().key;
-            msg!("Invalid delegate account");
-            msg!("Expected: {}", ald.delegate_key.to_string());
-            msg!("Received: {}", right.to_string());
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if ald.token_mint != *ctx.accounts.token_mint.to_account_info().key {
-            msg!("Invalid token mint account");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        if ald.token_account != *ctx.accounts.user_token.to_account_info().key {
-            msg!("Invalid user token account");
-            return Err(ErrorCode::InvalidAccount.into());
-        }
-        // Check recipient_key option
-        if ald.recipient_key.is_some() {
-            if ald.recipient_key.unwrap() != *ctx.accounts.token_recipient.to_account_info().key {
-                msg!("Invalid recipient account");
-                return Err(ErrorCode::InvalidAccount.into());
-            }
-        }
+        verify_matching_accounts(&ald.delegate_key, ctx.accounts.delegate_key.to_account_info().key,
+            Some(String::from("Invalid delegate account"))
+        )?;
+
+        verify_matching_accounts(&ald.token_account, ctx.accounts.token_account.to_account_info().key,
+            Some(String::from("Invalid user token account"))
+        )?;
 
         // Validate timeframe
         if ald.not_valid_before > 0 || ald.not_valid_after > 0 {
@@ -1644,16 +1520,17 @@ mod token_agent {
             if diff.is_some() {
                 // Perform transfer
                 ald.amount = diff.unwrap();
+                msg!("Allowance: {}", ald.amount.to_string());
                 //msg!("End: {}", ald.amount.to_string());
                 let seeds = &[
-                    ctx.accounts.user_key.to_account_info().key.as_ref(),
-                    &[inp_user_nonce],
+                    ctx.program_id.as_ref(),
+                    &[inp_root_nonce],
                 ];
                 let signer = &[&seeds[..]];
                 let cpi_accounts = Transfer {
-                    from: ctx.accounts.user_token.to_account_info(),
+                    from: ctx.accounts.token_account.to_account_info(),
                     to: ctx.accounts.token_recipient.to_account_info(),
-                    authority: ctx.accounts.user_agent.to_account_info(),
+                    authority: ctx.accounts.root_key.to_account_info(),
                 };
                 let cpi_program = ctx.accounts.token_program.clone();
                 let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
@@ -1664,7 +1541,17 @@ mod token_agent {
             }
         }
         Ok(())
-    } */
+    }
+
+    pub fn close_allowance(ctx: Context<CloseAllowance>) -> ProgramResult {
+        let ald = &ctx.accounts.allowance_data;
+        verify_matching_accounts(&ald.user_key, ctx.accounts.user_key.to_account_info().key,
+            Some(String::from("Invalid user key"))
+        )?;
+
+        msg!("Closed Allowance: {}", ctx.accounts.allowance_data.to_account_info().key.to_string());
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -1830,37 +1717,45 @@ pub struct CreateAllowance<'info> {
     pub system_program: UncheckedAccount<'info>,
 }
 
-/*#[derive(Accounts)]
+#[derive(Accounts)]
+#[instruction(inp_link_token: bool, _inp_root_nonce: u8, _inp_allowance_nonce: u8)]
 pub struct UpdateAllowance<'info> {
+    #[account(mut, seeds = [token_account.key().as_ref(), delegate_key.key().as_ref()], bump = _inp_allowance_nonce)]
+    pub allowance_data: Account<'info, TokenAllowance>,
+    pub user_key: Signer<'info>,
+    #[account(seeds = [program_id.as_ref()], bump = _inp_root_nonce)]
+    pub root_key: UncheckedAccount<'info>,
+    pub delegate_key: UncheckedAccount<'info>,
     #[account(mut)]
-    pub allowance_data: ProgramAccount<'info, TokenAllowance>,
-    #[account(signer)]
-    pub user_key: AccountInfo<'info>,
-    pub user_agent: AccountInfo<'info>,
-    pub delegate_key: AccountInfo<'info>,
+    pub token_account: Account<'info, TokenAccount>,
+    #[account(address = token::ID)]
+    pub token_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(inp_root_nonce: u8, _inp_allowance_nonce: u8)]
+pub struct DelegatedTransfer<'info> {
+    #[account(mut, seeds = [token_account.key().as_ref(), delegate_key.key().as_ref()], bump = _inp_allowance_nonce)]
+    pub allowance_data: Account<'info, TokenAllowance>,
+    pub delegate_key: Signer<'info>,
+    #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]
+    pub root_key: UncheckedAccount<'info>,
     #[account(mut)]
-    pub token_account: AccountInfo<'info>,
-    pub token_mint: AccountInfo<'info>,
+    pub token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub token_recipient: Account<'info, TokenAccount>,
     #[account(address = token::ID)]
     pub token_program: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
-pub struct DelegatedTransfer<'info> {
+pub struct CloseAllowance<'info> {
+    #[account(mut, close = fee_recipient)]
+    pub allowance_data: Account<'info, TokenAllowance>,
+    pub user_key: Signer<'info>,
     #[account(mut)]
-    pub allowance_data: ProgramAccount<'info, TokenAllowance>,
-    #[account(signer)]
-    pub delegate_key: AccountInfo<'info>,
-    pub user_key: AccountInfo<'info>,
-    pub user_agent: AccountInfo<'info>,
-    #[account(mut)]
-    pub user_token: AccountInfo<'info>,
-    pub token_mint: AccountInfo<'info>,
-    #[account(mut)]
-    pub token_recipient: AccountInfo<'info>,
-    #[account(address = token::ID)]
-    pub token_program: AccountInfo<'info>,
-}*/
+    pub fee_recipient: Signer<'info>,
+}
 
 #[account]
 pub struct SubscrData {

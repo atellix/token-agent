@@ -32,7 +32,7 @@ async function programAddress(inputs) {
 
 async function main() {
     const tokenAccount = new PublicKey('AL95HoRjCnaWm2R8GFWoCdoFaPTDCqt7yrxQ69z4DCMD')
-    const tokenRecipient = new PublicKey('3Qh11vYtpKamT8WK8mD5UgdeBCk3gP8Z5eh3oe98AsGC')
+    const tokenRecipient = new PublicKey('ABNZWLmf3BZnKVfU7pzJnfCrWVQcJvGZG85feF7E19L3')
 
     var managerPK
     if (false) {
@@ -50,14 +50,14 @@ async function main() {
     console.log('User Allowance: ' + userAllowance['pubkey'])
     console.log('Manager Public Key: ' + managerPK.publicKey.toString())
 
-    if (true) {
+    if (false) {
         console.log('Create Allowance')
         let tx = new anchor.web3.Transaction()
         tx.add(tokenAgent.transaction.createAllowance(
             true,                                       // Link token
             rootKey.nonce,                              // Root key nonce
             userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(1000 * 10000),                // Amount
+            new anchor.BN(100 * 10000),                 // Amount
             new anchor.BN(0),                           // Start time, or 0 for none
             new anchor.BN(0),                           // Expire time, or 0 for none
             {
@@ -73,13 +73,13 @@ async function main() {
                 //remainingAccounts: [],
             }
         ))
-        //console.log(tx)
+        console.log(tx)
         console.log(await provider.send(tx))
     }
     if (false) {
         console.log('Perform Delegated Transfer')
-        await tokenAgent.rpc.delegatedTransfer(
-            userAgent.nonce,                            // User agent nonce
+        console.log(await tokenAgent.rpc.delegatedTransfer(
+            rootKey.nonce,                              // Root key nonce
             userAllowance.nonce,                        // Allowance nonce
             new anchor.BN(50 * 10000),                  // Amount
             {
@@ -87,42 +87,40 @@ async function main() {
                 accounts: {
                     allowanceData: new PublicKey(userAllowance.pubkey),
                     userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
-                    userToken: tokenAccount,                            // From
+                    rootKey: new PublicKey(rootKey.pubkey),
+                    tokenAccount: tokenAccount,                         // From
                     tokenRecipient: tokenRecipient,                     // To
                     delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
                     tokenProgram: TOKEN_PROGRAM_ID,
                 },
             }
-        )
+        ))
     }
-    if (false) {
+    if (true) {
         console.log('Update Allowance')
-        await tokenAgent.rpc.updateAllowance(
+        console.log(await tokenAgent.rpc.updateAllowance(
             true,                                       // Link token
-            userAgent.nonce,                            // User agent nonce
+            rootKey.nonce,                              // Root key nonce
             userAllowance.nonce,                        // Allowance nonce
-            new anchor.BN(1000 * 10000),                // Amount
+            new anchor.BN(10 * 10000),                  // Amount
             new anchor.BN(0),                           // Start time, or 0 for none
             new anchor.BN(0),                           // Expire time, or 0 for none
             {
                 accounts: {
                     allowanceData: new PublicKey(userAllowance.pubkey),
                     userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
+                    rootKey: new PublicKey(rootKey.pubkey),
                     delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
                     tokenAccount: tokenAccount,
                     tokenProgram: TOKEN_PROGRAM_ID,
                 },
             }
-        )
+        ))
     }
-    if (false) {
+    if (true) {
         console.log('Perform Delegated Transfer 2')
-        await tokenAgent.rpc.delegatedTransfer(
-            userAgent.nonce,                            // User agent nonce
+        console.log(await tokenAgent.rpc.delegatedTransfer(
+            rootKey.nonce,                              // Root key nonce
             userAllowance.nonce,                        // Allowance nonce
             new anchor.BN(30 * 10000),                  // Amount
             {
@@ -130,15 +128,14 @@ async function main() {
                 accounts: {
                     allowanceData: new PublicKey(userAllowance.pubkey),
                     userKey: provider.wallet.publicKey,
-                    userAgent: new PublicKey(userAgent.pubkey),
-                    userToken: tokenAccount,                            // From
+                    rootKey: new PublicKey(rootKey.pubkey),
+                    tokenAccount: tokenAccount,                         // From
                     tokenRecipient: tokenRecipient,                     // To
                     delegateKey: managerPK.publicKey,
-                    tokenMint: tokenMint,
                     tokenProgram: TOKEN_PROGRAM_ID,
                 },
             }
-        )
+        ))
     }
 }
 
