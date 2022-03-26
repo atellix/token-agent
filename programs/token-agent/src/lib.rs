@@ -11,7 +11,7 @@ use solana_program::{ system_program, account_info::AccountInfo, clock::Clock };
 use net_authority::{ self, cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
 
-declare_id!("AGNTcdPiqzTvTczVNihCFQAoaT6Q6xqrtRMWkExyHCdm");
+declare_id!("D9rrYo1kDYghrqnBccZHpCevR4VcmpbGpkYa4jQj7naM");
 
 pub const VERSION_MAJOR: u32 = 1;
 pub const VERSION_MINOR: u32 = 0;

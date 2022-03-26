@@ -449,20 +449,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "decode-account"
-version = "1.7.8"
-dependencies = [
- "base64 0.12.3",
- "bincode",
- "bs58 0.3.1",
- "lazy_static",
- "serde",
- "serde_derive",
- "solana-program",
- "thiserror",
-]
-
-[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1037,6 +1023,7 @@ dependencies = [
 [[package]]
 name = "slab-alloc"
 version = "1.0.0"
+source = "git+https://github.com/atellix/slab-alloc?branch=net-authority#9c33a5a605bcc8d7218c11c189d124f76fb7784a"
 dependencies = [
  "arrayref",
  "bytemuck",
@@ -1297,7 +1284,6 @@ dependencies = [
  "arrayref",
  "bytemuck",
  "chrono",
- "decode-account",
  "net-authority",
  "num_enum",
  "solana-program",

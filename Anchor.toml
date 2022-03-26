@@ -3,7 +3,7 @@ url = "https://anchor.projectserum.com"
 
 [provider]
 cluster = "devnet"
-wallet = "/Users/mfrager/.config/solana/id.json"
+wallet = "/home/mfrager/.config/solana/id.json"
 
 [scripts]
 test = "mocha -t 1000000 tests/"
