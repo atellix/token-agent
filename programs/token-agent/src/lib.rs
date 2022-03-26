@@ -11,7 +11,7 @@ use solana_program::{ system_program, account_info::AccountInfo, clock::Clock };
 use net_authority::{ self, cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
 
-declare_id!("D9rrYo1kDYghrqnBccZHpCevR4VcmpbGpkYa4jQj7naM");
+declare_id!("AGNT4iaxE9emYuFjVGttZbsaEeQra2RKv9RFjA5A5yuW");
 
 pub const VERSION_MAJOR: u32 = 1;
 pub const VERSION_MINOR: u32 = 0;
@@ -889,7 +889,7 @@ mod token_agent {
             msg!("Invalid negative rebill timestamp");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
-        if ts < inp_rebill_ts && false { // TODO: REMOVE THIS BEFORE LAUNCH!!!
+        if ts < inp_rebill_ts {
             msg!("Attempted rebill before scheduled time");
             return Err(ErrorCode::InvalidTimeframe.into());
         }

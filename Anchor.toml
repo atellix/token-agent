@@ -2,8 +2,8 @@
 url = "https://anchor.projectserum.com"
 
 [provider]
-cluster = "devnet"
-wallet = "/home/mfrager/.config/solana/id.json"
+cluster = "mainnet"
+wallet = "/tmp/ramdisk/export/key-deploy-1.json"
 
 [scripts]
 test = "mocha -t 1000000 tests/"
