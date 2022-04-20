@@ -57,6 +57,7 @@ async function main() {
     const subscrId = uuidv4()
     const subscrData = anchor.web3.Keypair.generate()
     const subscrDataBytes = tokenAgent.account.subscrData.size
+    console.log('Subscr Data Bytes: ' + subscrDataBytes)
     const subscrDataRent = await provider.connection.getMinimumBalanceForRentExemption(subscrDataBytes)
     console.log('Subscr Data Rent: ' + subscrDataRent)
     //const merchantPK = anchor.web3.Keypair.generate()
