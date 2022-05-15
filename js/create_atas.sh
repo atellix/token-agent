@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ROOT=/Users/mfrager/Build/solana/data
+ROOT=/home/mfrager/Build/solana/data
 
 KEY_TOKEN_USDV=$ROOT/export/key-usdv-token-1.json
 
