@@ -15,7 +15,7 @@ declare_id!("AGNT4iaxE9emYuFjVGttZbsaEeQra2RKv9RFjA5A5yuW");
 
 pub const VERSION_MAJOR: u32 = 1;
 pub const VERSION_MINOR: u32 = 0;
-pub const VERSION_PATCH: u32 = 0;
+pub const VERSION_PATCH: u32 = 1;
 
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
@@ -34,8 +34,8 @@ pub fn get_period_string(ts: i64, period: SubscriptionPeriod) -> FnResult<String
         SubscriptionPeriod::Weekly => Ok(dt.format("%Yw%U").to_string()),
         SubscriptionPeriod::Monthly => Ok(dt.format("%Y%m").to_string()),
         SubscriptionPeriod::Quarterly => {
-            let mut q = dt.date().month().checked_div(3).ok_or(ProgramError::from(ErrorCode::Overflow))?;
-            q = q.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+            let mut q = dt.date().month().checked_div(3).ok_or(error!(ErrorCode::Overflow))?;
+            q = q.checked_add(1).ok_or(error!(ErrorCode::Overflow))?;
             Ok(format!("{}q{}", dt.format("%Y").to_string(), q.to_string()))
         },
         SubscriptionPeriod::Yearly => Ok(dt.format("%Y").to_string()),
@@ -48,7 +48,7 @@ pub enum SwapMode {
     AtxSwapContractV1,
 }
 
-fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<String>) -> ProgramResult {
+fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<String>) -> anchor_lang::Result<()> {
     if *left != *right {
         if error_msg.is_some() {
             msg!(error_msg.unwrap().as_str());
@@ -67,12 +67,12 @@ fn load_struct<T: AccountDeserialize>(acc: &AccountInfo) -> FnResult<T, ProgramE
 }
 
 #[inline]
-fn store_struct<T: AccountSerialize>(obj: &T, acc: &AccountInfo) -> FnResult<(), ProgramError> {
+fn store_struct<T: AccountSerialize>(obj: &T, acc: &AccountInfo) -> FnResult<(), Error> {
     let mut data = acc.try_borrow_mut_data()?;
     let disc_bytes = array_ref![data, 0, 8];
     if disc_bytes != &[0; 8] {
         msg!("Account already initialized");
-        return Err(ErrorCode::InvalidAccount.into());
+        return Err(error!(ErrorCode::InvalidAccount));
     }
     let dst: &mut [u8] = &mut data;
     let mut crs = Cursor::new(dst);
@@ -89,7 +89,7 @@ mod token_agent {
         inp_developer_url: String,
         inp_source_url: String,
         inp_verify_url: String,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let md = &mut ctx.accounts.program_info;
         md.semvar_major = VERSION_MAJOR;
         md.semvar_minor = VERSION_MINOR;
@@ -133,7 +133,7 @@ mod token_agent {
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
         inp_swap_dst_nonce: u8,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
 
@@ -216,13 +216,13 @@ mod token_agent {
             timeframe_start = inp_not_valid_before;
         }
 
-        let timeframe_end = timeframe_start.checked_add(max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let timeframe_end = timeframe_start.checked_add(max_delay).ok_or(error!(ErrorCode::Overflow))?;
         if inp_next_rebill < timeframe_start || inp_next_rebill > timeframe_end {
             msg!("Next rebill not within timeframe");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         let d1 = get_period_string(inp_next_rebill, period.unwrap())?;
-        let prev_period = inp_next_rebill.checked_sub(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let prev_period = inp_next_rebill.checked_sub(1).ok_or(error!(ErrorCode::Overflow))?;
         let d2 = get_period_string(prev_period, period.unwrap())?;
         if d1 == d2 {
             msg!("Next rebill not beginning of period");
@@ -327,11 +327,11 @@ mod token_agent {
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
                 let f1: u128 = (net_amount as u128) << 64;
-                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
-                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(error!(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(error!(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(error!(ErrorCode::Overflow))?;
                     fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
@@ -435,7 +435,7 @@ mod token_agent {
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
         inp_swap_dst_nonce: u8,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
         let subscr = &mut ctx.accounts.subscr_data;
@@ -533,13 +533,13 @@ mod token_agent {
         if inp_not_valid_before > 0 {
             timeframe_start = inp_not_valid_before;
         }
-        let timeframe_end = timeframe_start.checked_add(inp_max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let timeframe_end = timeframe_start.checked_add(inp_max_delay).ok_or(error!(ErrorCode::Overflow))?;
         if inp_next_rebill < timeframe_start || inp_next_rebill > timeframe_end {
             msg!("Next rebill not within timeframe");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         let d1 = get_period_string(inp_next_rebill, period.unwrap())?;
-        let prev_period = inp_next_rebill.checked_sub(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let prev_period = inp_next_rebill.checked_sub(1).ok_or(error!(ErrorCode::Overflow))?;
         let d2 = get_period_string(prev_period, period.unwrap())?;
         if d1 == d2 {
             msg!("Next rebill not beginning of period");
@@ -645,11 +645,11 @@ mod token_agent {
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
                 let f1: u128 = (net_amount as u128) << 64;
-                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
-                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(error!(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(error!(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(error!(ErrorCode::Overflow))?;
                     fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
@@ -726,7 +726,7 @@ mod token_agent {
         Ok(())
     }
 
-    pub fn close_subscription(ctx: Context<CloseSubscr>) -> ProgramResult {
+    pub fn close_subscription(ctx: Context<CloseSubscr>) -> anchor_lang::Result<()> {
         let subscr = &ctx.accounts.subscr_data;
         verify_matching_accounts(&subscr.user_key, ctx.accounts.user_key.to_account_info().key,
             Some(String::from("User key does not match subscription"))
@@ -736,7 +736,7 @@ mod token_agent {
         Ok(())
     }
 
-    pub fn update_manager<'info>(ctx: Context<'_, '_, '_, 'info, UpdateManager<'info>>) -> ProgramResult {
+    pub fn update_manager<'info>(ctx: Context<'_, '_, '_, 'info, UpdateManager<'info>>) -> anchor_lang::Result<()> {
         let subscr = &mut ctx.accounts.subscr_data;
         verify_matching_accounts(&subscr.manager_key, &ctx.accounts.manager_prev.to_account_info().key,
             Some(String::from("Previous manager does not match subscription"))
@@ -755,7 +755,7 @@ mod token_agent {
         Ok(())
     }
 
-    pub fn manager_cancel<'info>(ctx: Context<'_, '_, '_, 'info, ManagerCancel<'info>>) -> ProgramResult {
+    pub fn manager_cancel<'info>(ctx: Context<'_, '_, '_, 'info, ManagerCancel<'info>>) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
 
         let subscr = &mut ctx.accounts.subscr_data;
@@ -803,7 +803,7 @@ mod token_agent {
         inp_swap_data_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
 
@@ -897,7 +897,7 @@ mod token_agent {
             msg!("Rebill timestamp does not match subscription");
             return Err(ErrorCode::InvalidTimeframe.into());
         }
-        let timeframe_end = inp_rebill_ts.checked_add(subscr.max_delay).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let timeframe_end = inp_rebill_ts.checked_add(subscr.max_delay).ok_or(error!(ErrorCode::Overflow))?;
         if ts > timeframe_end {
             msg!("Rebill expired");
             return Err(ErrorCode::Expired.into());
@@ -908,7 +908,7 @@ mod token_agent {
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         let d2 = get_period_string(inp_next_rebill, period.unwrap())?;
-        let prev_period = inp_next_rebill.checked_sub(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        let prev_period = inp_next_rebill.checked_sub(1).ok_or(error!(ErrorCode::Overflow))?;
         let d3 = get_period_string(prev_period, period.unwrap())?;
         if d2 == d3 {
             msg!("Next rebill not beginning of period");
@@ -933,7 +933,7 @@ mod token_agent {
                     msg!("Amount exceeds total budget");
                     return Err(ErrorCode::TotalBudgetExceeded.into());
                 }
-                subscr.total_budget = subscr.total_budget.checked_sub(inp_amount).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                subscr.total_budget = subscr.total_budget.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
             }
             // Swap if requested
             let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
@@ -973,11 +973,11 @@ mod token_agent {
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
                 let f1: u128 = (net_amount as u128) << 64;
-                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
-                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(error!(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(error!(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(error!(ErrorCode::Overflow))?;
                     fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
@@ -1015,7 +1015,7 @@ mod token_agent {
 
         // Update parameters
         subscr.next_rebill = inp_next_rebill;
-        subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+        subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(error!(ErrorCode::Overflow))?;
 
         msg!("atellix-log");
         emit!(SubscrEvent {
@@ -1048,7 +1048,7 @@ mod token_agent {
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
         inp_swap_dst_nonce: u8,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
 
         // Verify merchant's associated token
@@ -1140,11 +1140,11 @@ mod token_agent {
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
                 let f1: u128 = (net_amount as u128) << 64;
-                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
-                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(error!(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(error!(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(error!(ErrorCode::Overflow))?;
                     fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
@@ -1219,7 +1219,7 @@ mod token_agent {
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
         inp_swap_dst_nonce: u8,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
 
         // Verify merchant's associated token
@@ -1311,11 +1311,11 @@ mod token_agent {
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
                 let f1: u128 = (net_amount as u128) << 64;
-                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(ProgramError::from(ErrorCode::Overflow))?;
-                let f3: u128 = f2.checked_div(10000).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(error!(ErrorCode::Overflow))?;
+                let f3: u128 = f2.checked_div(10000).ok_or(error!(ErrorCode::Overflow))?;
                 let fees: u64 = (f3 >> 64) as u64;
                 if fees > 0 {
-                    net_amount = net_amount.checked_sub(fees).ok_or(ProgramError::from(ErrorCode::Overflow))?;
+                    net_amount = net_amount.checked_sub(fees).ok_or(error!(ErrorCode::Overflow))?;
                     fee_amount = fees;
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
@@ -1385,7 +1385,7 @@ mod token_agent {
         inp_amount: u64,
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
 
@@ -1437,7 +1437,7 @@ mod token_agent {
         inp_amount: u64,
         inp_not_valid_before: i64,
         inp_not_valid_after: i64,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
 
@@ -1488,7 +1488,7 @@ mod token_agent {
         inp_root_nonce: u8,
         _inp_allowance_nonce: u8,
         inp_amount: u64,
-    ) -> ProgramResult {
+    ) -> anchor_lang::Result<()> {
         let ald = &mut ctx.accounts.allowance_data;
 
         verify_matching_accounts(&ald.delegate_key, ctx.accounts.delegate_key.to_account_info().key,
@@ -1543,7 +1543,7 @@ mod token_agent {
         Ok(())
     }
 
-    pub fn close_allowance(ctx: Context<CloseAllowance>) -> ProgramResult {
+    pub fn close_allowance(ctx: Context<CloseAllowance>) -> anchor_lang::Result<()> {
         let ald = &ctx.accounts.allowance_data;
         verify_matching_accounts(&ald.user_key, ctx.accounts.user_key.to_account_info().key,
             Some(String::from("Invalid user key"))
@@ -1556,7 +1556,7 @@ mod token_agent {
 
 #[derive(Accounts)]
 pub struct UpdateMetadata<'info> {
-    #[account(constraint = program.programdata_address() == Some(program_data.key()))]
+    #[account(constraint = program.programdata_address().unwrap() == Some(program_data.key()))]
     pub program: Program<'info, TokenAgent>,
     #[account(constraint = program_data.upgrade_authority_address == Some(program_admin.key()))]
     pub program_data: Account<'info, ProgramData>,
@@ -1702,7 +1702,7 @@ pub struct MerchantReceive<'info> {
 #[derive(Accounts)]
 #[instruction(inp_link_token: bool, _inp_root_nonce: u8, _inp_allowance_nonce: u8)]
 pub struct CreateAllowance<'info> {
-    #[account(init, seeds = [token_account.key().as_ref(), delegate_key.key().as_ref()], bump, payer = user_key)]
+    #[account(init, seeds = [token_account.key().as_ref(), delegate_key.key().as_ref()], bump, payer = user_key, space = 128)]
     pub allowance_data: Account<'info, TokenAllowance>,
     #[account(mut)]
     pub user_key: Signer<'info>,
@@ -1827,6 +1827,7 @@ pub struct TokenAllowance {
     pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
     pub amount: u64,                    // The amount of tokens for the allowance (same decimals as underlying token)
 }
+// Size: 8 + 32 + 32 + 32 + 8 + 8 + 8 = 128
 
 #[event]
 pub struct SubscrEvent {
@@ -1864,16 +1865,16 @@ pub struct ProgramMetadata {
     pub semvar_minor: u32,
     pub semvar_patch: u32,
     pub program: Pubkey,
-    pub program_name: String,   // Max len 64
-    pub developer_name: String, // Max len 64
-    pub developer_url: String,  // Max len 128
-    pub source_url: String,     // Max len 128
-    pub verify_url: String,     // Max len 128
+    pub program_name: String,   // Max len 60
+    pub developer_name: String, // Max len 60
+    pub developer_url: String,  // Max len 124
+    pub source_url: String,     // Max len 124
+    pub verify_url: String,     // Max len 124
 }
 // 8 + (4 * 3) + (4 * 5) + (64 * 2) + (128 * 3) + 32
 // Data length (with discrim): 584 bytes
 
-#[error]
+#[error_code]
 pub enum ErrorCode {
     #[msg("Inactive subscription")]
     InactiveSubscription,
