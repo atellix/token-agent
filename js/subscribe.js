@@ -55,7 +55,7 @@ async function main() {
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
 
-    const delegateProgram = new PublicKey('CjgRxYXrLSnc95LtYXi7vcfmgC5gbV496xKZDo3hmyWN')
+    const delegateProgram = new PublicKey('TDLGbdMdskdC2DPz2eSeW3tuxtqRchjt5JMsUrdGTGm')
     const delegateRoot = await programAddress([delegateProgram.toBuffer()], delegateProgram)
     const delegateRootPK = new PublicKey(delegateRoot.pubkey)
     const allowance = await programAddress([tokenAccount.toBuffer(), rootKeyPK.toBuffer()], delegateProgram)
@@ -206,6 +206,7 @@ async function main() {
             0,                                              // inp_swap_root_nonce
             0,                                              // inp_swap_inb_nonce
             0,                                              // inp_swap_out_nonce
+            new anchor.BN(0),                               // inp_swap_estimate
             {
                 accounts: {
                     subscrData: subscrData.publicKey,

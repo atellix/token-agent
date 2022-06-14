@@ -114,7 +114,7 @@ async function main() {
     const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
     const userToken1PK = new PublicKey(userToken1.pubkey)
 
-    const delegateProgram = new PublicKey('CjgRxYXrLSnc95LtYXi7vcfmgC5gbV496xKZDo3hmyWN')
+    const delegateProgram = new PublicKey('TDLGbdMdskdC2DPz2eSeW3tuxtqRchjt5JMsUrdGTGm')
     const delegateRoot = await programAddress([delegateProgram.toBuffer()], delegateProgram)
     const delegateRootPK = new PublicKey(delegateRoot.pubkey)
     const allowance = await programAddress([userToken1PK.toBuffer(), rootKeyPK.toBuffer()], delegateProgram)
@@ -245,6 +245,7 @@ async function main() {
             swapData.nonce,                                 // inp_swap_data_nonce
             tokData1.nonce,                                 // inp_swap_inb_nonce
             tokData2.nonce,                                 // inp_swap_out_nonce
+            new anchor.BN(0),                               // inp_swap_estimate
             {
                 accounts: {
                     subscrData: subscrData.publicKey,

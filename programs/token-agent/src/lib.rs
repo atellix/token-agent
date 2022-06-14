@@ -820,6 +820,7 @@ mod token_agent {
         inp_swap_data_nonce: u8,
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
+        inp_swap_estimate: u64,
     ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
@@ -963,6 +964,14 @@ mod token_agent {
                 )?;
                 let token_user_amount: u64 = load_struct::<TokenAccount>(acc_swap_token).unwrap().amount;
                 let token_swap_amount: u64 = load_struct::<TokenAccount>(ctx.remaining_accounts.get(3).unwrap()).unwrap().amount;
+                let token_transfer;
+                if inp_swap_estimate == 0 || token_user_amount < inp_swap_estimate {
+                    // swap estimate >= user tokens, transfer all
+                    token_transfer = token_user_amount;
+                } else {
+                    // swap estimate < user tokens, use estimate
+                    token_transfer = inp_swap_estimate;
+                }
                 // Delegated transfer all tokens to token-agent owned swap input account then transfer remaining back below
                 let cpi_accounts = DelegateTransfer {
                     allowance: ctx.accounts.allowance.to_account_info(),
@@ -974,7 +983,7 @@ mod token_agent {
                 };
                 let cpi_program = ctx.accounts.delegate_program.to_account_info();
                 let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
-                token_delegate::cpi::delegate_transfer(cpi_ctx, token_user_amount)?; // TODO: use swap estimate if less
+                token_delegate::cpi::delegate_transfer(cpi_ctx, token_transfer)?; // TODO: use swap estimate if less
 
                 let swap_mode = SwapMode::try_from_primitive(subscr.swap_mode);
                 if swap_mode.is_err() {
