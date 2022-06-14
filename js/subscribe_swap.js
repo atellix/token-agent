@@ -49,6 +49,7 @@ async function main() {
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
 
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
+    const rootKeyPK = new PublicKey(rootKey.pubkey)
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
 
@@ -111,6 +112,15 @@ async function main() {
     const tokData2 = await associatedTokenAddress(new PublicKey(swapData.pubkey), tokenMint2)
 
     const userToken1 = await associatedTokenAddress(provider.wallet.publicKey, tokenMint1)
+    const userToken1PK = new PublicKey(userToken1.pubkey)
+
+    const delegateProgram = new PublicKey('CjgRxYXrLSnc95LtYXi7vcfmgC5gbV496xKZDo3hmyWN')
+    const delegateRoot = await programAddress([delegateProgram.toBuffer()], delegateProgram)
+    const delegateRootPK = new PublicKey(delegateRoot.pubkey)
+    const allowance = await programAddress([userToken1PK.toBuffer(), rootKeyPK.toBuffer()], delegateProgram)
+    const allowancePK = new PublicKey(allowance.pubkey)
+    const agentSwap = await associatedTokenAddress(rootKeyPK, tokenMint1)
+    const agentSwapPK = new PublicKey(agentSwap.pubkey)
 
     console.log('User Token 1: ' + userToken1.pubkey)
     console.log('Payment Token: ' + tokenAccount.toString())
@@ -133,6 +143,10 @@ async function main() {
         tokenAccount: tokenAccount.toString(),
         feesAccount: new PublicKey(feesTK.pubkey).toString(),
         swapData: new PublicKey(swapData.pubkey).toString(),
+        delegateProgram: delegateProgram.toString(),
+        delegateRoot: delegateRootPK.toString(),
+        allowance: allowancePK.toString(),
+        systemProgram: SystemProgram.programId.toString(),
     })
 
     const tx = new anchor.web3.Transaction()
@@ -178,6 +192,10 @@ async function main() {
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
+                delegateProgram: delegateProgram,
+                delegateRoot: delegateRootPK,
+                allowance: allowancePK,
+                systemProgram: SystemProgram.programId,
             },
             remainingAccounts: [
                 { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
@@ -207,6 +225,9 @@ async function main() {
             tokenMint: tokenMint.toString(),
             tokenAccount: tokenAccount.toString(),
             feesAccount: new PublicKey(feesTK.pubkey).toString(),
+            delegateProgram: delegateProgram.toString(),
+            delegateRoot: delegateRootPK.toString(),
+            allowance: allowancePK.toString(),
         })
 
         var eventId = uuidv4()
@@ -236,11 +257,15 @@ async function main() {
                     tokenProgram: TOKEN_PROGRAM_ID,
                     tokenAccount: tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),
+                    delegateProgram: delegateProgram,
+                    delegateRoot: delegateRootPK,
+                    allowance: allowancePK,
                 },
                 remainingAccounts: [
                     { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
                     { pubkey: swapContractPK, isWritable: false, isSigner: false },
                     { pubkey: swapDataPK, isWritable: true, isSigner: false },
+                    { pubkey: agentSwapPK, isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
                     { pubkey: swapFeesTK, isWritable: true, isSigner: false },

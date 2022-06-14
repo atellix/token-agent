@@ -1412,6 +1412,16 @@ dependencies = [
  "num_enum",
  "solana-program",
  "swap-contract",
+ "token-delegate",
+]
+
+[[package]]
+name = "token-delegate"
+version = "1.0.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "solana-program",
 ]
 
 [[package]]

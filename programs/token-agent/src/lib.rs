@@ -10,6 +10,7 @@ use solana_program::{ system_program, account_info::AccountInfo, clock::Clock };
 
 use net_authority::{ self, cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
+use token_delegate::{ self, cpi::accounts::{ DelegateApprove, DelegateTransfer } };
 
 declare_id!("AGNTcdPiqzTvTczVNihCFQAoaT6Q6xqrtRMWkExyHCdm");
 
@@ -246,14 +247,19 @@ mod token_agent {
 
         // Setup up token delegate if needed
         if !inp_swap && inp_link_token {
-            let cpi_accounts = Approve {
-                to: ctx.accounts.token_account.to_account_info(),
+            let cpi_accounts = DelegateApprove {
+                allowance: ctx.accounts.allowance.to_account_info(),
+                allowance_payer: ctx.accounts.user_key.to_account_info(),
+                owner: ctx.accounts.user_key.to_account_info(),
                 delegate: ctx.accounts.root_key.to_account_info(),
-                authority: ctx.accounts.user_key.to_account_info(),
+                delegate_root: ctx.accounts.delegate_root.to_account_info(),
+                token_account: ctx.accounts.token_account.to_account_info(),
+                token_program: ctx.accounts.token_program.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
             };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
+            let cpi_program = ctx.accounts.delegate_program.to_account_info();
             let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-            token::approve(cpi_ctx, u64::MAX)?;
+            token_delegate::cpi::delegate_approve(cpi_ctx, true, u64::MAX, u64::MAX)?;
         }
 
         // Perform transfer
@@ -267,14 +273,19 @@ mod token_agent {
 
                 // Setup up token delegate if needed
                 if inp_link_token {
-                    let cpi_accounts = Approve {
-                        to: acc_swap_token.clone(),
+                    let cpi_accounts = DelegateApprove {
+                        allowance: ctx.accounts.allowance.to_account_info(),
+                        allowance_payer: ctx.accounts.user_key.to_account_info(),
+                        owner: ctx.accounts.user_key.to_account_info(),
                         delegate: ctx.accounts.root_key.to_account_info(),
-                        authority: ctx.accounts.user_key.to_account_info(),
+                        delegate_root: ctx.accounts.delegate_root.to_account_info(),
+                        token_account: acc_swap_token.clone(),
+                        token_program: ctx.accounts.token_program.to_account_info(),
+                        system_program: ctx.accounts.system_program.to_account_info(),
                     };
-                    let cpi_program = ctx.accounts.token_program.to_account_info();
+                    let cpi_program = ctx.accounts.delegate_program.to_account_info();
                     let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-                    token::approve(cpi_ctx, u64::MAX)?;
+                    token_delegate::cpi::delegate_approve(cpi_ctx, true, u64::MAX, u64::MAX)?;
                 }
 
                 // Verify token agent's swap destination associated token
@@ -319,10 +330,8 @@ mod token_agent {
                 }
             }
 
-            // Transfer tokens
             let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
             let root_pda_signer = &[&root_pda_seeds[..]];
-            let token_auth = ctx.accounts.root_key.to_account_info();
 
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
@@ -336,10 +345,14 @@ mod token_agent {
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
-                        authority: token_auth.clone(),
+                        authority: if inp_swap { ctx.accounts.root_key.to_account_info() } else { ctx.accounts.user_key.to_account_info() },
                     };
                     let cpi_program = ctx.accounts.token_program.to_account_info();
-                    let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                    let cpi_ctx = if inp_swap {
+                        CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer)
+                    } else {
+                        CpiContext::new(cpi_program, cpi_accounts)
+                    };
                     token::transfer(cpi_ctx, fees)?;
                 }
             }
@@ -347,10 +360,14 @@ mod token_agent {
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
                 to: ctx.accounts.merchant_token.to_account_info(),
-                authority: token_auth.clone(),
+                authority: if inp_swap { ctx.accounts.root_key.to_account_info() } else { ctx.accounts.user_key.to_account_info() },
             };
             let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+            let cpi_ctx = if inp_swap {
+                CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer)
+            } else {
+                CpiContext::new(cpi_program, cpi_accounts)
+            };
             token::transfer(cpi_ctx, net_amount)?;
 
             // Record merchant revenue
@@ -940,35 +957,62 @@ mod token_agent {
             let root_pda_signer = &[&root_pda_seeds[..]];
             if subscr.swap {
                 //msg!("Atellix: Attempt swap");
+                let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
+                verify_matching_accounts(&subscr.swap_account, &acc_swap_token.key(),
+                    Some(String::from("Swap token does not match subscription"))
+                )?;
+                let token_user_amount: u64 = load_struct::<TokenAccount>(acc_swap_token).unwrap().amount;
+                let token_swap_amount: u64 = load_struct::<TokenAccount>(ctx.remaining_accounts.get(3).unwrap()).unwrap().amount;
+                // Delegated transfer all tokens to token-agent owned swap input account then transfer remaining back below
+                let cpi_accounts = DelegateTransfer {
+                    allowance: ctx.accounts.allowance.to_account_info(),
+                    delegate: ctx.accounts.root_key.to_account_info(),
+                    delegate_root: ctx.accounts.delegate_root.to_account_info(),
+                    from: acc_swap_token.clone(),
+                    to: ctx.remaining_accounts.get(3).unwrap().clone(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.delegate_program.to_account_info();
+                let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                token_delegate::cpi::delegate_transfer(cpi_ctx, token_user_amount)?; // TODO: use swap estimate if less
+
                 let swap_mode = SwapMode::try_from_primitive(subscr.swap_mode);
                 if swap_mode.is_err() {
                     msg!("Invalid swap mode");
                     return Err(ErrorCode::InvalidSwapMode.into());
                 }
                 if swap_mode.unwrap() == SwapMode::AtxSwapContractV1 {
-                    let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
-                    verify_matching_accounts(&subscr.swap_account, &acc_swap_token.key(),
-                        Some(String::from("Swap token does not match subscription"))
-                    )?;
+                    // Perform swap
                     let sw_program = ctx.remaining_accounts.get(1).unwrap().clone();
                     let sw_accounts = Swap {
-                        swap_user: ctx.accounts.root_key.to_account_info(),            // Root key (signer)
+                        swap_user: ctx.accounts.root_key.to_account_info(),             // Root key (signer)
                         swap_data: ctx.remaining_accounts.get(2).unwrap().clone(),
-                        inb_token_src: acc_swap_token.clone(),
-                        inb_token_dst: ctx.remaining_accounts.get(3).unwrap().clone(),
-                        out_token_src: ctx.remaining_accounts.get(4).unwrap().clone(),
-                        out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA
-                        fees_token: ctx.remaining_accounts.get(5).unwrap().clone(),
+                        inb_token_src: ctx.remaining_accounts.get(3).unwrap().clone(),  // Token Agent PDA (input)
+                        inb_token_dst: ctx.remaining_accounts.get(4).unwrap().clone(),
+                        out_token_src: ctx.remaining_accounts.get(5).unwrap().clone(),
+                        out_token_dst: ctx.accounts.token_account.to_account_info(),    // Token Agent PDA (output)
+                        fees_token: ctx.remaining_accounts.get(6).unwrap().clone(),
                         token_program: ctx.accounts.token_program.to_account_info(),
                     };
                     let mut sw_ctx = CpiContext::new_with_signer(sw_program, sw_accounts, root_pda_signer);
-                    if ctx.remaining_accounts.len() > 6 { // Oracle Data Account (if needed)
-                        sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(6).unwrap().clone()]);
+                    if ctx.remaining_accounts.len() > 7 { // Oracle Data Account (if needed)
+                        sw_ctx = sw_ctx.with_remaining_accounts(vec![ctx.remaining_accounts.get(7).unwrap().clone()]);
                     }
                     swap_contract::cpi::swap(sw_ctx, inp_swap_data_nonce, inp_swap_inb_nonce, inp_swap_out_nonce, 0, subscr.swap_direction, false, true, inp_amount)?;
                 }
+
+                // Transfer remaining tokens back ;)
+                let token_post_amount: u64 = load_struct::<TokenAccount>(ctx.remaining_accounts.get(3).unwrap()).unwrap().amount;
+                let token_return: u64 = token_post_amount.checked_sub(token_swap_amount).ok_or(error!(ErrorCode::Overflow))?;
+                let cpi_accounts = Transfer {
+                    from: ctx.remaining_accounts.get(3).unwrap().clone(),
+                    to: acc_swap_token.clone(),
+                    authority: ctx.accounts.root_key.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.token_program.to_account_info();
+                let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                token::transfer(cpi_ctx, token_return)?;
             }
-            let token_auth = ctx.accounts.root_key.to_account_info();
 
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
@@ -979,25 +1023,53 @@ mod token_agent {
                 if fees > 0 {
                     net_amount = net_amount.checked_sub(fees).ok_or(error!(ErrorCode::Overflow))?;
                     fee_amount = fees;
-                    let cpi_accounts = Transfer {
-                        from: ctx.accounts.token_account.to_account_info(),
-                        to: ctx.accounts.fees_account.to_account_info(),
-                        authority: token_auth.clone(),
-                    };
-                    let cpi_program = ctx.accounts.token_program.to_account_info();
-                    let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
-                    token::transfer(cpi_ctx, fees)?;
+                    if subscr.swap {
+                        let cpi_accounts = Transfer {
+                            from: ctx.accounts.token_account.to_account_info(),
+                            to: ctx.accounts.fees_account.to_account_info(),
+                            authority: ctx.accounts.root_key.to_account_info(),
+                        };
+                        let cpi_program = ctx.accounts.token_program.to_account_info();
+                        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                        token::transfer(cpi_ctx, fees)?;
+                    } else {
+                        let cpi_accounts = DelegateTransfer {
+                            allowance: ctx.accounts.allowance.to_account_info(),
+                            delegate: ctx.accounts.root_key.to_account_info(),
+                            delegate_root: ctx.accounts.delegate_root.to_account_info(),
+                            from: ctx.accounts.token_account.to_account_info(),
+                            to: ctx.accounts.fees_account.to_account_info(),
+                            token_program: ctx.accounts.token_program.to_account_info(),
+                        };
+                        let cpi_program = ctx.accounts.delegate_program.to_account_info();
+                        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                        token_delegate::cpi::delegate_transfer(cpi_ctx, fees)?;
+                    }
                 }
                 //msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
             }
-            let cpi_accounts = Transfer {
-                from: ctx.accounts.token_account.to_account_info(),
-                to: ctx.accounts.merchant_token.to_account_info(),
-                authority: token_auth.clone(),
-            };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
-            token::transfer(cpi_ctx, net_amount)?;
+            if subscr.swap {
+                let cpi_accounts = Transfer {
+                    from: ctx.accounts.token_account.to_account_info(),
+                    to: ctx.accounts.merchant_token.to_account_info(),
+                    authority: ctx.accounts.root_key.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.token_program.to_account_info();
+                let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                token::transfer(cpi_ctx, net_amount)?;
+            } else {
+                let cpi_accounts = DelegateTransfer {
+                    allowance: ctx.accounts.allowance.to_account_info(),
+                    delegate: ctx.accounts.root_key.to_account_info(),
+                    delegate_root: ctx.accounts.delegate_root.to_account_info(),
+                    from: ctx.accounts.token_account.to_account_info(),
+                    to: ctx.accounts.fees_account.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.delegate_program.to_account_info();
+                let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                token_delegate::cpi::delegate_transfer(cpi_ctx, net_amount)?;
+            }
 
             // Record merchant revenue
             let na_program = ctx.accounts.net_auth.to_account_info();
@@ -1377,181 +1449,6 @@ mod token_agent {
 
         Ok(())
     }
-
-    pub fn create_allowance(ctx: Context<CreateAllowance>,
-        inp_link_token: bool,
-        _inp_root_nonce: u8,
-        _inp_allowance_nonce: u8,
-        inp_amount: u64,
-        inp_not_valid_before: i64,
-        inp_not_valid_after: i64,
-    ) -> anchor_lang::Result<()> {
-        let clock = Clock::get()?;
-        let ts = clock.unix_timestamp;
-
-        // Validate input
-        if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
-            msg!("Invalid allowance start");
-            return Err(ErrorCode::InvalidTimeframe.into());
-        }
-        if inp_not_valid_after < 0 || (inp_not_valid_after > 0 && inp_not_valid_after < ts) {
-            msg!("Invalid allowance end");
-            return Err(ErrorCode::InvalidTimeframe.into());
-        }
-        if inp_not_valid_after != 0 && inp_not_valid_before != 0 {
-            if inp_not_valid_after <= inp_not_valid_before {
-                msg!("Invalid timeframe");
-                return Err(ErrorCode::InvalidTimeframe.into());
-            }
-        }
-
-        // Setup up token delegate if needed
-        if inp_link_token {
-            let cpi_accounts = Approve {
-                to: ctx.accounts.token_account.to_account_info(),
-                delegate: ctx.accounts.root_key.to_account_info(),
-                authority: ctx.accounts.user_key.to_account_info(),
-            };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-            token::approve(cpi_ctx, u64::MAX)?;
-        }
-
-        let tka = &mut ctx.accounts.allowance_data;
-        tka.user_key = *ctx.accounts.user_key.to_account_info().key;
-        tka.delegate_key = *ctx.accounts.delegate_key.to_account_info().key;
-        tka.token_account = *ctx.accounts.token_account.to_account_info().key;
-        tka.not_valid_before = inp_not_valid_before;
-        tka.not_valid_after = inp_not_valid_after;
-        tka.amount = inp_amount;
-
-        msg!("Allowance: {}", inp_amount.to_string());
-
-        Ok(())
-    }
-
-    pub fn update_allowance(ctx: Context<UpdateAllowance>,
-        inp_link_token: bool,
-        _inp_root_nonce: u8,
-        _inp_allowance_nonce: u8,
-        inp_amount: u64,
-        inp_not_valid_before: i64,
-        inp_not_valid_after: i64,
-    ) -> anchor_lang::Result<()> {
-        let clock = Clock::get()?;
-        let ts = clock.unix_timestamp;
-
-        let ald = &ctx.accounts.allowance_data;
-        verify_matching_accounts(&ald.user_key, ctx.accounts.user_key.to_account_info().key,
-            Some(String::from("Invalid user key"))
-        )?;
-
-        // Validate input
-        if inp_not_valid_before < 0 || (inp_not_valid_before > 0 && inp_not_valid_before < ts) {
-            msg!("Invalid allowance start");
-            return Err(ErrorCode::InvalidTimeframe.into());
-        }
-        if inp_not_valid_after < 0 || (inp_not_valid_after > 0 && inp_not_valid_after < ts) {
-            msg!("Invalid allowance end");
-            return Err(ErrorCode::InvalidTimeframe.into());
-        }
-        if inp_not_valid_after != 0 && inp_not_valid_before != 0 {
-            if inp_not_valid_after <= inp_not_valid_before {
-                msg!("Invalid timeframe");
-                return Err(ErrorCode::InvalidTimeframe.into());
-            }
-        }
-
-        // Setup up token delegate if needed
-        if inp_link_token {
-            let cpi_accounts = Approve {
-                to: ctx.accounts.token_account.to_account_info(),
-                delegate: ctx.accounts.root_key.to_account_info(),
-                authority: ctx.accounts.user_key.to_account_info(),
-            };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-            token::approve(cpi_ctx, u64::MAX)?;
-        }
-
-        let tka = &mut ctx.accounts.allowance_data;
-        tka.not_valid_before = inp_not_valid_before;
-        tka.not_valid_after = inp_not_valid_after;
-        tka.amount = inp_amount;
-
-        msg!("Allowance: {}", inp_amount.to_string());
-
-        Ok(())
-    }
-
-    pub fn delegated_transfer(ctx: Context<DelegatedTransfer>,
-        inp_root_nonce: u8,
-        _inp_allowance_nonce: u8,
-        inp_amount: u64,
-    ) -> anchor_lang::Result<()> {
-        let ald = &mut ctx.accounts.allowance_data;
-
-        verify_matching_accounts(&ald.delegate_key, ctx.accounts.delegate_key.to_account_info().key,
-            Some(String::from("Invalid delegate account"))
-        )?;
-
-        verify_matching_accounts(&ald.token_account, ctx.accounts.token_account.to_account_info().key,
-            Some(String::from("Invalid user token account"))
-        )?;
-
-        // Validate timeframe
-        if ald.not_valid_before > 0 || ald.not_valid_after > 0 {
-            let clock = Clock::get()?;
-            let ts = clock.unix_timestamp;
-            if ald.not_valid_before > 0 && ts < ald.not_valid_before {
-                msg!("Allowance not valid yet");
-                return Err(ErrorCode::NotValidYet.into());
-            }
-            if ald.not_valid_after > 0 && ts > ald.not_valid_after {
-                msg!("Allowance expired");
-                return Err(ErrorCode::Expired.into());
-            }
-        }
-
-        if inp_amount > 0 {
-            //msg!("Transfer amount: {}", inp_amount.to_string());
-            //msg!("Begin: {}", ald.amount.to_string());
-            let diff = ald.amount.checked_sub(inp_amount);
-            if diff.is_some() {
-                // Perform transfer
-                ald.amount = diff.unwrap();
-                msg!("Allowance: {}", ald.amount.to_string());
-                //msg!("End: {}", ald.amount.to_string());
-                let seeds = &[
-                    ctx.program_id.as_ref(),
-                    &[inp_root_nonce],
-                ];
-                let signer = &[&seeds[..]];
-                let cpi_accounts = Transfer {
-                    from: ctx.accounts.token_account.to_account_info(),
-                    to: ctx.accounts.token_recipient.to_account_info(),
-                    authority: ctx.accounts.root_key.to_account_info(),
-                };
-                let cpi_program = ctx.accounts.token_program.clone();
-                let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-                token::transfer(cpi_ctx, inp_amount)?;
-            } else {
-                msg!("Amount exceeds allowance");
-                return Err(ErrorCode::AllowanceExceeded.into());
-            }
-        }
-        Ok(())
-    }
-
-    pub fn close_allowance(ctx: Context<CloseAllowance>) -> anchor_lang::Result<()> {
-        let ald = &ctx.accounts.allowance_data;
-        verify_matching_accounts(&ald.user_key, ctx.accounts.user_key.to_account_info().key,
-            Some(String::from("Invalid user key"))
-        )?;
-
-        msg!("Closed Allowance: {}", ctx.accounts.allowance_data.to_account_info().key.to_string());
-        Ok(())
-    }
 }
 
 #[derive(Accounts)]
@@ -1589,6 +1486,13 @@ pub struct CreateSubscr<'info> {
     pub token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub fees_account: UncheckedAccount<'info>,
+    #[account(address = token_delegate::ID)]
+    pub delegate_program: UncheckedAccount<'info>,
+    pub delegate_root: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub allowance: UncheckedAccount<'info>,
+    #[account(address = system_program::ID)]
+    pub system_program: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -1659,6 +1563,11 @@ pub struct ProcessSubscr<'info> {
     pub token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub fees_account: UncheckedAccount<'info>,
+    #[account(address = token_delegate::ID)]
+    pub delegate_program: UncheckedAccount<'info>,
+    pub delegate_root: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub allowance: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -1697,64 +1606,6 @@ pub struct MerchantReceive<'info> {
     pub token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub fees_account: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-#[instruction(inp_link_token: bool, _inp_root_nonce: u8, _inp_allowance_nonce: u8)]
-pub struct CreateAllowance<'info> {
-    #[account(init, seeds = [token_account.key().as_ref(), delegate_key.key().as_ref()], bump, payer = user_key, space = 128)]
-    pub allowance_data: Account<'info, TokenAllowance>,
-    #[account(mut)]
-    pub user_key: Signer<'info>,
-    #[account(seeds = [program_id.as_ref()], bump = _inp_root_nonce)]
-    pub root_key: UncheckedAccount<'info>,
-    pub delegate_key: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub token_account: Account<'info, TokenAccount>,
-    #[account(address = token::ID)]
-    pub token_program: UncheckedAccount<'info>,
-    #[account(address = system_program::ID)]
-    pub system_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-#[instruction(inp_link_token: bool, _inp_root_nonce: u8, _inp_allowance_nonce: u8)]
-pub struct UpdateAllowance<'info> {
-    #[account(mut, seeds = [token_account.key().as_ref(), delegate_key.key().as_ref()], bump = _inp_allowance_nonce)]
-    pub allowance_data: Account<'info, TokenAllowance>,
-    pub user_key: Signer<'info>,
-    #[account(seeds = [program_id.as_ref()], bump = _inp_root_nonce)]
-    pub root_key: UncheckedAccount<'info>,
-    pub delegate_key: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub token_account: Account<'info, TokenAccount>,
-    #[account(address = token::ID)]
-    pub token_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-#[instruction(inp_root_nonce: u8, _inp_allowance_nonce: u8)]
-pub struct DelegatedTransfer<'info> {
-    #[account(mut, seeds = [token_account.key().as_ref(), delegate_key.key().as_ref()], bump = _inp_allowance_nonce)]
-    pub allowance_data: Account<'info, TokenAllowance>,
-    pub delegate_key: Signer<'info>,
-    #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]
-    pub root_key: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub token_account: Account<'info, TokenAccount>,
-    #[account(mut)]
-    pub token_recipient: Account<'info, TokenAccount>,
-    #[account(address = token::ID)]
-    pub token_program: AccountInfo<'info>,
-}
-
-#[derive(Accounts)]
-pub struct CloseAllowance<'info> {
-    #[account(mut, close = fee_recipient)]
-    pub allowance_data: Account<'info, TokenAllowance>,
-    pub user_key: Signer<'info>,
-    #[account(mut)]
-    pub fee_recipient: Signer<'info>,
 }
 
 #[account]
@@ -1816,18 +1667,6 @@ impl Default for SubscrData {
         }
     }
 }
-
-#[account]
-#[derive(Default)]
-pub struct TokenAllowance {
-    pub user_key: Pubkey,               // The user that owns the tokens
-    pub delegate_key: Pubkey,           // The delegate granted an allowance of tokens to transfer
-    pub token_account: Pubkey,          // The token account for the allowance
-    pub not_valid_before: i64,          // UTC timestamp before which no subscription processing can occur
-    pub not_valid_after: i64,           // UTC timestamp after which no subscription processing can occur
-    pub amount: u64,                    // The amount of tokens for the allowance (same decimals as underlying token)
-}
-// Size: 8 + 32 + 32 + 32 + 8 + 8 + 8 = 128
 
 #[event]
 pub struct SubscrEvent {
@@ -1898,8 +1737,6 @@ pub enum ErrorCode {
     TotalBudgetExceeded,
     #[msg("Period budget exceeded")]
     PeriodBudgetExceeded,
-    #[msg("Allowance exceeded")]
-    AllowanceExceeded,
     #[msg("Access denied")]
     AccessDenied,
     #[msg("Subscription not valid yet")]

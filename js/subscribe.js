@@ -51,8 +51,15 @@ async function main() {
     const tokenAccount = new PublicKey(walletToken.pubkey)
 
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
+    const rootKeyPK = new PublicKey(rootKey.pubkey)
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
+
+    const delegateProgram = new PublicKey('CjgRxYXrLSnc95LtYXi7vcfmgC5gbV496xKZDo3hmyWN')
+    const delegateRoot = await programAddress([delegateProgram.toBuffer()], delegateProgram)
+    const delegateRootPK = new PublicKey(delegateRoot.pubkey)
+    const allowance = await programAddress([tokenAccount.toBuffer(), rootKeyPK.toBuffer()], delegateProgram)
+    const allowancePK = new PublicKey(allowance.pubkey)
 
     const subscrId = uuidv4()
     const subscrData = anchor.web3.Keypair.generate()
@@ -111,6 +118,9 @@ async function main() {
         tokenProgram: TOKEN_PROGRAM_ID.toString(),
         tokenAccount: tokenAccount.toString(),
         feesAccount: new PublicKey(feesTK.pubkey).toString(),
+        delegateProgram: delegateProgram.toString(),
+        delegateRoot: delegateRootPK.toString(),
+        allowance: allowancePK.toString(),
         systemProgram: SystemProgram.programId.toString(),
     })
 
@@ -153,6 +163,9 @@ async function main() {
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
+                delegateProgram: delegateProgram,
+                delegateRoot: delegateRootPK,
+                allowance: allowancePK,
                 systemProgram: SystemProgram.programId,
             },
         }
@@ -174,6 +187,9 @@ async function main() {
             tokenMint: tokenMint.toString(),
             tokenAccount: tokenAccount.toString(),
             feesAccount: new PublicKey(feesTK.pubkey).toString(),
+            delegateProgram: delegateProgram.toString(),
+            delegateRoot: delegateRootPK.toString(),
+            allowance: allowancePK.toString(),
         })
 
         var dt1 = dt0.plus({ months: 1 })
@@ -202,6 +218,9 @@ async function main() {
                     tokenProgram: TOKEN_PROGRAM_ID,
                     tokenAccount: tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),
+                    delegateProgram: delegateProgram,
+                    delegateRoot: delegateRootPK,
+                    allowance: allowancePK,
                 }
             }
         )
