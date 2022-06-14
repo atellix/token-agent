@@ -4,7 +4,7 @@ use arrayref::array_ref;
 use num_enum::TryFromPrimitive;
 use chrono::{ NaiveDateTime, Datelike };
 use anchor_lang::prelude::*;
-use anchor_spl::token::{ self, Token, TokenAccount, Transfer, Approve };
+use anchor_spl::token::{ self, Token, TokenAccount, Transfer };
 use anchor_spl::associated_token::{ AssociatedToken };
 use solana_program::{ system_program, account_info::AccountInfo, clock::Clock };
 
@@ -432,6 +432,10 @@ mod token_agent {
     pub fn update_subscription<'info>(ctx: Context<'_, '_, '_, 'info, UpdateSubscr<'info>>,
         inp_active: bool,
         inp_link_token: bool,
+        inp_max_delay: i64,
+        inp_next_rebill: i64,
+        inp_not_valid_before: i64,
+        inp_not_valid_after: i64,
         inp_amount: u64,
         inp_payment_id: u128,
         inp_merchant_nonce: u8,
@@ -440,11 +444,7 @@ mod token_agent {
         inp_period_budget: u64,
         inp_use_total: bool,
         inp_total_budget: u64,
-        inp_next_rebill: i64,
         inp_rebill_max: u32,
-        inp_not_valid_before: i64,
-        inp_not_valid_after: i64,
-        inp_max_delay: i64,
         inp_swap: bool,
         inp_swap_direction: bool,
         inp_swap_mode: u8,
@@ -535,7 +535,7 @@ mod token_agent {
             }
         }
         if inp_max_delay < 43200 { // 12 hours
-            msg!("Invalid max_delay below minimum of 12 hours (43200 seconds)");
+            msg!("Invalid max_delay: {} below minimum of 12 hours (43200 seconds)", inp_max_delay.to_string());
             return Err(ErrorCode::InvalidTimeframe.into());
         }
         if inp_next_rebill < 0 {
@@ -580,14 +580,19 @@ mod token_agent {
 
         // Setup up token delegate if needed
         if !inp_swap && inp_link_token {
-            let cpi_accounts = Approve {
-                to: ctx.accounts.token_account.to_account_info(),
+            let cpi_accounts = DelegateApprove {
+                allowance: ctx.accounts.allowance.to_account_info(),
+                allowance_payer: ctx.accounts.user_key.to_account_info(),
+                owner: ctx.accounts.user_key.to_account_info(),
                 delegate: ctx.accounts.root_key.to_account_info(),
-                authority: ctx.accounts.user_key.to_account_info(),
+                delegate_root: ctx.accounts.delegate_root.to_account_info(),
+                token_account: ctx.accounts.token_account.to_account_info(),
+                token_program: ctx.accounts.token_program.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
             };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
+            let cpi_program = ctx.accounts.delegate_program.to_account_info();
             let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-            token::approve(cpi_ctx, u64::MAX)?;
+            token_delegate::cpi::delegate_approve(cpi_ctx, true, u64::MAX, u64::MAX)?;
         }
 
         // Link swap token if requested
@@ -598,14 +603,19 @@ mod token_agent {
 
             // Setup up token delegate if needed
             if inp_link_token {
-                let cpi_accounts = Approve {
-                    to: acc_swap_token.clone(),
+                let cpi_accounts = DelegateApprove {
+                    allowance: ctx.accounts.allowance.to_account_info(),
+                    allowance_payer: ctx.accounts.user_key.to_account_info(),
+                    owner: ctx.accounts.user_key.to_account_info(),
                     delegate: ctx.accounts.root_key.to_account_info(),
-                    authority: ctx.accounts.user_key.to_account_info(),
+                    delegate_root: ctx.accounts.delegate_root.to_account_info(),
+                    token_account: acc_swap_token.clone(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
                 };
-                let cpi_program = ctx.accounts.token_program.to_account_info();
+                let cpi_program = ctx.accounts.delegate_program.to_account_info();
                 let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-                token::approve(cpi_ctx, u64::MAX)?;
+                token_delegate::cpi::delegate_approve(cpi_ctx, true, u64::MAX, u64::MAX)?;
             }
         }
 
@@ -657,7 +667,6 @@ mod token_agent {
 
             let root_pda_seeds = &[ctx.program_id.as_ref(), &[inp_root_nonce]];
             let root_pda_signer = &[&root_pda_seeds[..]];
-            let token_auth = ctx.accounts.root_key.to_account_info();
 
             // Calculate fees
             if mrch_approval.fees_bps > 0 {
@@ -671,10 +680,14 @@ mod token_agent {
                     let cpi_accounts = Transfer {
                         from: ctx.accounts.token_account.to_account_info(),
                         to: ctx.accounts.fees_account.to_account_info(),
-                        authority: token_auth.clone(),
+                        authority: if inp_swap { ctx.accounts.root_key.to_account_info() } else { ctx.accounts.user_key.to_account_info() },
                     };
                     let cpi_program = ctx.accounts.token_program.to_account_info();
-                    let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+                    let cpi_ctx = if inp_swap {
+                        CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer)
+                    } else {
+                        CpiContext::new(cpi_program, cpi_accounts)
+                    };
                     token::transfer(cpi_ctx, fees)?;
                 }
                 //msg!("Starting Amount: {} Ending Amount: {} Fees: {}", inp_amount.to_string(), amount.to_string(), fees.to_string());
@@ -682,10 +695,14 @@ mod token_agent {
             let cpi_accounts = Transfer {
                 from: ctx.accounts.token_account.to_account_info(),
                 to: ctx.accounts.merchant_token.to_account_info(),
-                authority: token_auth.clone(),
+                authority: if inp_swap { ctx.accounts.root_key.to_account_info() } else { ctx.accounts.user_key.to_account_info() },
             };
             let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer);
+            let cpi_ctx = if inp_swap {
+                CpiContext::new_with_signer(cpi_program, cpi_accounts, root_pda_signer)
+            } else {
+                CpiContext::new(cpi_program, cpi_accounts)
+            };
             token::transfer(cpi_ctx, net_amount)?;
 
             // Record merchant revenue
@@ -1474,7 +1491,7 @@ pub struct UpdateMetadata<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_link_token: bool, inp_initial_amount: u64, inp_merchant_nonce: u8, inp_root_nonce: u8)]
+#[instruction(inp_link_token: bool, inp_initial_amount: u64, inp_merchant_nonce: u8, inp_root_nonce: u8, inp_subscr_id: u128, inp_payment_id: u128, inp_period: u8, inp_period_budget: u64, inp_use_total: bool, inp_total_budget: u64, inp_next_rebill: i64, inp_rebill_max: u32, inp_not_valid_before: i64, inp_not_valid_after: i64, inp_max_delay: i64, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
 pub struct CreateSubscr<'info> {
     #[account(mut)]
     pub subscr_data: UncheckedAccount<'info>,
@@ -1505,7 +1522,7 @@ pub struct CreateSubscr<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_active: bool, inp_link_token: bool, inp_amount: u64, inp_payment_id: u128, inp_merchant_nonce: u8, inp_root_nonce: u8)]
+#[instruction(inp_active: bool, inp_link_token: bool, inp_max_delay: i64, inp_next_rebill: i64, inp_not_valid_before: i64, inp_not_valid_after: i64, inp_amount: u64, inp_payment_id: u128, inp_merchant_nonce: u8, inp_root_nonce: u8, inp_period: u8, inp_period_budget: u64, inp_use_total: bool, inp_total_budget: u64, inp_rebill_max: u32, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
 pub struct UpdateSubscr<'info> {
     #[account(mut)]
     pub subscr_data: Account<'info, SubscrData>,
@@ -1524,6 +1541,13 @@ pub struct UpdateSubscr<'info> {
     pub token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub fees_account: UncheckedAccount<'info>,
+    #[account(address = token_delegate::ID)]
+    pub delegate_program: UncheckedAccount<'info>,
+    pub delegate_root: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub allowance: UncheckedAccount<'info>,
+    #[account(address = system_program::ID)]
+    pub system_program: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -1553,7 +1577,7 @@ pub struct ManagerCancel<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
+#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8, inp_rebill_ts: i64, inp_rebill_str: String, inp_next_rebill: i64, inp_amount: u64, inp_payment_id: u128, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_estimate: u64)]
 pub struct ProcessSubscr<'info> {
     #[account(mut)]
     pub subscr_data: Account<'info, SubscrData>,
@@ -1580,7 +1604,7 @@ pub struct ProcessSubscr<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
+#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8, inp_payment_id: u128, inp_amount: u64, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
 pub struct MerchantPayment<'info> {
     pub net_auth: UncheckedAccount<'info>,
     #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]
@@ -1599,7 +1623,7 @@ pub struct MerchantPayment<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
+#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8, inp_payment_id: u128, inp_amount: u64, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
 pub struct MerchantReceive<'info> {
     pub net_auth: UncheckedAccount<'info>,
     #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]

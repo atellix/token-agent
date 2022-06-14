@@ -1,13 +1,13 @@
 const { Buffer } = require('buffer')
 const { DateTime } = require("luxon")
 const { v4: uuidv4, parse: uuidparse } = require('uuid')
-const { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } = require('@solana/web3.js')
+const { Keypair, PublicKey, SystemProgram, Transaction, SYSVAR_RENT_PUBKEY } = require('@solana/web3.js')
 const { TOKEN_PROGRAM_ID } = require('@solana/spl-token')
 const fs = require('fs').promises
 const base32 = require("base32.js")
 
 const anchor = require('@project-serum/anchor')
-const provider = anchor.Provider.env()
+const provider = anchor.AnchorProvider.env()
 //const provider = anchor.Provider.local()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
@@ -37,7 +37,7 @@ function importSecretKey(keyStr) {
 }
 
 async function main() {
-    const subscrData = new PublicKey('HwWdBqxZm1i9mz9Ut67XL3vcbvh151wtu2VdXhNXFmgv')
+    const subscrData = new PublicKey('7y3nHg2k5EEUKSeHZBGmMgbKg7QJuFqDD22HFH94qi3G')
 
     var ndjs
     try {
@@ -49,8 +49,10 @@ async function main() {
     //console.log(netData)
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
     const tokenAccount = await associatedTokenAddress(provider.wallet.publicKey, tokenMint)
+    const tokenAccountPK = new PublicKey(tokenAccount.pubkey)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
-    const rootKey = await programAddress([tokenAgentPK.toBuffer()])
+    const rootKey = await programAddress([tokenAgentPK.toBuffer()], tokenAgentPK)
+    const rootKeyPK = new PublicKey(rootKey.pubkey)
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
     const feesPK = new PublicKey(netData.fees1)
@@ -59,6 +61,12 @@ async function main() {
     const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
     const merchantToken = await associatedTokenAddress(merchantPK, tokenMint)
     const managerSK = importSecretKey(netData.manager1_secret)
+
+    const delegateProgram = new PublicKey('TDLGbdMdskdC2DPz2eSeW3tuxtqRchjt5JMsUrdGTGm')
+    const delegateRoot = await programAddress([delegateProgram.toBuffer()], delegateProgram)
+    const delegateRootPK = new PublicKey(delegateRoot.pubkey)
+    const allowance = await programAddress([tokenAccountPK.toBuffer(), rootKeyPK.toBuffer()], delegateProgram)
+    const allowancePK = new PublicKey(allowance.pubkey)
 
     var act = await tokenAgent.account.subscrData.fetch(subscrData)
     console.log('Initial Subscription Data')
@@ -71,31 +79,31 @@ async function main() {
     var dts0 = dt0.toFormat("yyyyLLdd")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
     act.period = 0
-    act.periodBudget = new anchor.BN(100000)
+    act.periodBudget = new anchor.BN(2250000)
     act.useTotal = false
     act.totalBudget = new anchor.BN(0)
     act.nextRebill = new anchor.BN(Math.floor(dt0.toSeconds()))
-    let txsig = await tokenAgent.rpc.updateSubscription(
+    let tx = new Transaction()
+    tx.add(tokenAgent.transaction.updateSubscription(
         act.active,                                     // inp_active
         true,                                           // inp_link_token
+        act.maxDelay,                                   // inp_max_delay
+        act.nextRebill,                                 // inp_next_rebill
+        act.notValidBefore,                             // inp_not_valid_before
+        act.notValidAfter,                              // inp_not_valid_after
         new anchor.BN(100000),                          // inp_amount
-        new anchor.BN(3333),                            // inp_payment_id
+        new anchor.BN(uuidparse(uuidv4())),             // inp_payment_id
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
-        netRoot.nonce,                                  // inp_net_nonce
         act.period,                                     // inp_period (2 = monthly)
         act.periodBudget,                               // inp_period_budget
         act.useTotal,                                   // inp_use_total
         act.totalBudget,                                // inp_total_budget
-        act.nextRebill,                                 // inp_next_rebill
         act.rebillMax,                                  // inp_rebill_max
-        act.notValidBefore,                             // inp_not_valid_before
-        act.notValidAfter,                              // inp_not_valid_after
-        act.maxDelay,                                   // inp_max_delay
         false, // act.swap,                             // inp_swap
         false, // act.swap_direction,                   // inp_swap_direction
         0,                                              // inp_swap_mode
-        0,                                              // inp_swap_root_nonce
+        0,                                              // inp_swap_data_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
         0,                                              // inp_swap_dst_nonce
@@ -114,11 +122,16 @@ async function main() {
                 userKey: act.userKey,
                 tokenProgram: TOKEN_PROGRAM_ID,
                 tokenMint: act.tokenMint,
-                tokenAccount: new PublicKey(tokenAccount.pubkey), // act.tokenAccount,
+                tokenAccount: new PublicKey(tokenAccount.pubkey),
                 feesAccount: new PublicKey(feesTK.pubkey),
+                delegateProgram: delegateProgram,
+                delegateRoot: delegateRootPK,
+                allowance: allowancePK,
+                systemProgram: SystemProgram.programId,
             }
         }
-    )
+    ))
+    var txsig = await provider.sendAndConfirm(tx, [], { 'skipPreflight': true })
     console.log(txsig)
     var act2 = await tokenAgent.account.subscrData.fetch(subscrData)
     console.log('Updated Subscription Data')
@@ -127,7 +140,7 @@ async function main() {
     var dt1
     var dts1
     var rbtx
-    for (var x = 0; x < 40; x++) {
+    for (var x = 0; x < 3; x++) {
         dt1 = dt0.plus({ days: 1 })
         dts1 = dt1.toFormat("yyyyLLdd")
         console.log('Current Rebill: ' + dts0 + ' (' + Math.floor(dt0.toSeconds()) + ')')
@@ -135,7 +148,6 @@ async function main() {
         const tx3 = await tokenAgent.transaction.process(
             merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
             rootKey.nonce,                                  // inp_root_nonce
-            netRoot.nonce,                                  // inp_net_nonce
             new anchor.BN(Math.floor(dt0.toSeconds())),     // inp_rebill_ts
             dts0,                                           // inp_rebill_str
             new anchor.BN(Math.floor(dt1.toSeconds())),     // inp_next_rebill
@@ -144,6 +156,7 @@ async function main() {
             0,                                              // inp_swap_root_nonce
             0,                                              // inp_swap_inb_nonce
             0,                                              // inp_swap_out_nonce
+            new anchor.BN(0),                               // inp_swap_estimate
             {
                 accounts: {
                     subscrData: subscrData,
@@ -160,10 +173,13 @@ async function main() {
                     tokenMint: act.tokenMint,
                     tokenAccount: new PublicKey(tokenAccount.pubkey),
                     feesAccount: new PublicKey(feesTK.pubkey),
+                    delegateProgram: delegateProgram,
+                    delegateRoot: delegateRootPK,
+                    allowance: allowancePK,
                 }
             }
         )
-        rbtx = await provider.send(tx3, [managerSK])
+        rbtx = await provider.sendAndConfirm(tx3, [managerSK])
         console.log(rbtx)
         dt0 = dt1
         dts0 = dts1

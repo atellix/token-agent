@@ -7,7 +7,7 @@ const fs = require('fs').promises
 const base32 = require("base32.js")
 
 const anchor = require('@project-serum/anchor')
-const provider = anchor.Provider.env()
+const provider = anchor.AnchorProvider.env()
 //const provider = anchor.Provider.local()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
@@ -170,7 +170,7 @@ async function main() {
             },
         }
     ))
-    let txid = await provider.send(tx, [subscrData])
+    let txid = await provider.sendAndConfirm(tx, [subscrData])
     console.log(txid)
 
     if (true) {
@@ -225,7 +225,7 @@ async function main() {
                 }
             }
         )
-        console.log(await provider.send(tx3, [managerSK]))
+        console.log(await provider.sendAndConfirm(tx3, [managerSK]))
 
         /* console.log('Process 2')
         eventId = uuidv4()
