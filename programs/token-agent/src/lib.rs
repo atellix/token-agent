@@ -436,11 +436,15 @@ mod token_agent {
         inp_link_token: bool,
         inp_amount: u64,
         inp_payment_id: u128,
-        inp_use_total: bool,
-        inp_total_budget: u64,
+        inp_next_rebill: i64,
+        //inp_rebill_max: u32,
         inp_period: u8,
         inp_period_budget: u64,
-        inp_rebill_max: u32,
+        //inp_use_total: bool,
+        //inp_total_budget: u64,
+        inp_max_delay: i64,
+        inp_not_valid_before: i64,
+        inp_not_valid_after: i64,
         inp_swap: bool,
         inp_swap_direction: bool,
         inp_swap_mode: u8,
@@ -448,11 +452,28 @@ mod token_agent {
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
         inp_swap_dst_nonce: u8,
-        inp_max_delay: i64,
-        inp_next_rebill: i64,
-        inp_not_valid_before: i64,
-        inp_not_valid_after: i64,
     ) -> anchor_lang::Result<()> {
+
+        /*msg!("inp_merchant_nonce: {}", inp_merchant_nonce.to_string());
+        msg!("inp_root_nonce: {}", inp_root_nonce.to_string());
+        msg!("inp_active: {}", inp_active.to_string());
+        msg!("inp_link_token: {}", inp_link_token.to_string());
+        msg!("inp_payment_id: {}", inp_payment_id.to_string());
+        msg!("inp_amount: {}", inp_amount.to_string());
+        msg!("inp_period: {}", inp_period.to_string());
+        msg!("inp_period_budget: {}", inp_period_budget.to_string());
+        msg!("inp_next_rebill: {}", inp_next_rebill.to_string());
+        msg!("inp_max_delay: {}", inp_max_delay.to_string());
+        msg!("inp_not_valid_before: {}", inp_not_valid_before.to_string());
+        msg!("inp_not_valid_after: {}", inp_not_valid_after.to_string());
+        msg!("inp_swap: {}", inp_swap.to_string());
+        msg!("inp_swap_direction: {}", inp_swap_direction.to_string());
+        msg!("inp_swap_mode: {}", inp_swap_mode.to_string());
+        msg!("inp_swap_data_nonce: {}", inp_swap_data_nonce.to_string());
+        msg!("inp_swap_inb_nonce: {}", inp_swap_inb_nonce.to_string());
+        msg!("inp_swap_out_nonce: {}", inp_swap_out_nonce.to_string());
+        msg!("inp_swap_dst_nonce: {}", inp_swap_dst_nonce.to_string());*/
+
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
         let subscr = &mut ctx.accounts.subscr_data;
@@ -728,15 +749,15 @@ mod token_agent {
         subscr.token_mint = ctx.accounts.token_account.mint;
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
         subscr.swap_account = swap_account;
-        subscr.rebill_max = inp_rebill_max;
+        //subscr.rebill_max = inp_rebill_max;
         subscr.next_rebill = inp_next_rebill;
         subscr.max_delay = inp_max_delay;
         subscr.not_valid_before = inp_not_valid_before;
         subscr.not_valid_after = inp_not_valid_after;
         subscr.period = inp_period;
         subscr.period_budget = inp_period_budget;
-        subscr.use_total = inp_use_total;
-        subscr.total_budget = inp_total_budget;
+        //subscr.use_total = inp_use_total;
+        //subscr.total_budget = inp_total_budget;
         subscr.swap = inp_swap;
         subscr.swap_direction = inp_swap_direction;
         subscr.swap_mode = inp_swap_mode;

@@ -37,7 +37,7 @@ function importSecretKey(keyStr) {
 }
 
 async function main() {
-    const subscrData = new PublicKey('7y3nHg2k5EEUKSeHZBGmMgbKg7QJuFqDD22HFH94qi3G')
+    const subscrData = new PublicKey('89inGna9CbNqkVwsGQoKMidDe6Duz2rbFib1ByCq5sum')
 
     var ndjs
     try {
@@ -78,35 +78,36 @@ async function main() {
     dt0 = dt0.minus({ hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ days: 1 })
     var dts0 = dt0.toFormat("yyyyLLdd")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
-    act.period = 0
-    act.periodBudget = new anchor.BN(2250000)
-    act.useTotal = false
-    act.totalBudget = new anchor.BN(0)
-    act.nextRebill = new anchor.BN(Math.floor(dt0.toSeconds()))
+    var period = 0
+    var periodBudget = 200000
+    //act.useTotal = false
+    //act.totalBudget = new anchor.BN(0)
+    let nextRebill = new anchor.BN(Math.floor(dt0.toSeconds()))
+    let maxDelay = new anchor.BN(act.maxDelay.toString())
+    let pmtId = new anchor.BN(uuidparse(uuidv4()))
+    console.log('Payment ID: ' + pmtId.toString())
+    console.log('Max Delay: ' + maxDelay.toString())
     let tx = new Transaction()
     tx.add(tokenAgent.transaction.updateSubscription(
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
-        act.active,                                     // inp_active
+        true,                                           // inp_active
         true,                                           // inp_link_token
         new anchor.BN(100000),                          // inp_amount
-        new anchor.BN(uuidparse(uuidv4())),             // inp_payment_id
-        act.useTotal,                                   // inp_use_total
-        act.totalBudget,                                // inp_total_budget
-        act.period,                                     // inp_period (2 = monthly)
-        act.periodBudget,                               // inp_period_budget
-        act.rebillMax,                                  // inp_rebill_max
+        pmtId,                                          // inp_payment_id
+        nextRebill,                                     // inp_next_rebill
+        period,                                         // inp_period (2 = monthly)
+        new anchor.BN(periodBudget),                    // inp_period_budget
+        maxDelay,                                       // inp_max_delay
+        new anchor.BN(0),                               // inp_not_valid_before
+        new anchor.BN(0),                               // inp_not_valid_after
         false, // act.swap,                             // inp_swap
         false, // act.swap_direction,                   // inp_swap_direction
         0,                                              // inp_swap_mode
-        0,                                              // inp_swap_data_nonce
-        0,                                              // inp_swap_inb_nonce
-        0,                                              // inp_swap_out_nonce
-        0,                                              // inp_swap_dst_nonce
-        act.maxDelay,                                   // inp_max_delay
-        act.nextRebill,                                 // inp_next_rebill
-        act.notValidBefore,                             // inp_not_valid_before
-        act.notValidAfter,                              // inp_not_valid_after
+        1,                                              // inp_swap_data_nonce
+        2,                                              // inp_swap_inb_nonce
+        3,                                              // inp_swap_out_nonce
+        4,                                              // inp_swap_dst_nonce
         {
             accounts: {
                 subscrData: subscrData,

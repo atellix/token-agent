@@ -125,11 +125,12 @@ async function main() {
         true,                                           // inp_link_token
         new anchor.BN(100000),                          // inp_amount
         new anchor.BN(uuidparse(uuidv4())),             // inp_payment_id
-        act.useTotal,                                   // inp_use_total
-        act.totalBudget,                                // inp_total_budget
+        act.nextRebill,                                 // inp_next_rebill
         act.period,                                     // inp_period (2 = monthly)
         act.periodBudget,                               // inp_period_budget
-        act.rebillMax,                                  // inp_rebill_max
+        act.maxDelay,                                   // inp_max_delay
+        act.notValidBefore,                             // inp_not_valid_before
+        act.notValidAfter,                              // inp_not_valid_after
         true, // act.swap,                              // inp_swap
         true, // act.swap_direction,                    // inp_swap_direction
         0,                                              // inp_swap_mode: 0 = AtxSwapContractV1
@@ -137,10 +138,6 @@ async function main() {
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
         agentToken.nonce,                               // inp_swap_dst_nonce
-        act.maxDelay,                                   // inp_max_delay
-        act.nextRebill,                                 // inp_next_rebill
-        act.notValidBefore,                             // inp_not_valid_before
-        act.notValidAfter,                              // inp_not_valid_after
         {
             accounts: {
                 subscrData: subscrData,
