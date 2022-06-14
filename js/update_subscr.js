@@ -85,20 +85,16 @@ async function main() {
     act.nextRebill = new anchor.BN(Math.floor(dt0.toSeconds()))
     let tx = new Transaction()
     tx.add(tokenAgent.transaction.updateSubscription(
-        act.active,                                     // inp_active
-        true,                                           // inp_link_token
-        act.maxDelay,                                   // inp_max_delay
-        act.nextRebill,                                 // inp_next_rebill
-        act.notValidBefore,                             // inp_not_valid_before
-        act.notValidAfter,                              // inp_not_valid_after
-        new anchor.BN(100000),                          // inp_amount
-        new anchor.BN(uuidparse(uuidv4())),             // inp_payment_id
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
-        act.period,                                     // inp_period (2 = monthly)
-        act.periodBudget,                               // inp_period_budget
+        act.active,                                     // inp_active
+        true,                                           // inp_link_token
+        new anchor.BN(100000),                          // inp_amount
+        new anchor.BN(uuidparse(uuidv4())),             // inp_payment_id
         act.useTotal,                                   // inp_use_total
         act.totalBudget,                                // inp_total_budget
+        act.period,                                     // inp_period (2 = monthly)
+        act.periodBudget,                               // inp_period_budget
         act.rebillMax,                                  // inp_rebill_max
         false, // act.swap,                             // inp_swap
         false, // act.swap_direction,                   // inp_swap_direction
@@ -107,6 +103,10 @@ async function main() {
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
         0,                                              // inp_swap_dst_nonce
+        act.maxDelay,                                   // inp_max_delay
+        act.nextRebill,                                 // inp_next_rebill
+        act.notValidBefore,                             // inp_not_valid_before
+        act.notValidAfter,                              // inp_not_valid_after
         {
             accounts: {
                 subscrData: subscrData,

@@ -7,7 +7,7 @@ const fs = require('fs').promises
 const base32 = require("base32.js")
 
 const anchor = require('@project-serum/anchor')
-const provider = anchor.Provider.env()
+const provider = anchor.AnchorProvider.env()
 //const provider = anchor.Provider.local()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
@@ -37,7 +37,7 @@ function importSecretKey(keyStr) {
 }
 
 async function main() {
-    const subscrData = new PublicKey('B4dZS8kTkFtoj8Q6LKQnsW7Q1WVStzq1PWwZUycuiFS1')
+    const subscrData = new PublicKey('7Zj1XZybxxhrXSYmy9JtF5KqRZXFrSZ6GVnCv6C3Tcdz')
 
     var ndjs
     try {
@@ -83,6 +83,7 @@ async function main() {
     const tokenMint = new PublicKey(netData.tokenMintUSDV)
     const netAuth = new PublicKey(netData.netAuthorityProgram)
     const rootKey = await programAddress([tokenAgentPK.toBuffer()])
+    const rootKeyPK = new PublicKey(rootKey.pubkey)
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
     const feesPK = new PublicKey(netData.fees1)
@@ -91,8 +92,16 @@ async function main() {
     const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
     const managerSK = importSecretKey(netData.manager1_secret)
 
+    const inputToken = await associatedTokenAddress(new PublicKey(rootKey.pubkey), tokenMint1)
+    const inputAccount = new PublicKey(inputToken.pubkey)
     const agentToken = await associatedTokenAddress(new PublicKey(rootKey.pubkey), tokenMint)
     const tokenAccount = new PublicKey(agentToken.pubkey)
+
+    const delegateProgram = new PublicKey('TDLGbdMdskdC2DPz2eSeW3tuxtqRchjt5JMsUrdGTGm')
+    const delegateRoot = await programAddress([delegateProgram.toBuffer()], delegateProgram)
+    const delegateRootPK = new PublicKey(delegateRoot.pubkey)
+    const allowance = await programAddress([new PublicKey(userToken1.pubkey).toBuffer(), rootKeyPK.toBuffer()], delegateProgram)
+    const allowancePK = new PublicKey(allowance.pubkey)
 
     var act = await tokenAgent.account.subscrData.fetch(subscrData)
     console.log('Initial Subscription Data')
@@ -104,28 +113,23 @@ async function main() {
     dt0 = dt0.minus({ hours: dt0.hour, minutes: dt0.minute, seconds: dt0.second }).plus({ days: 1 })
     var dts0 = dt0.toFormat("yyyyLLdd")
     console.log('Next Rebill: ' + dts0 + ' - ' + dt0.toISO())
-    act.swap = true
     act.period = 0
     act.periodBudget = new anchor.BN(100000)
     act.useTotal = false
     act.totalBudget = new anchor.BN(0)
     act.nextRebill = new anchor.BN(Math.floor(dt0.toSeconds()))
     let txsig = await tokenAgent.rpc.updateSubscription(
+        merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
+        rootKey.nonce,                                  // inp_root_nonce
         act.active,                                     // inp_active
         true,                                           // inp_link_token
         new anchor.BN(100000),                          // inp_amount
-        new anchor.BN(4444),                            // inp_payment_id
-        merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
-        rootKey.nonce,                                  // inp_root_nonce
-        act.period,                                     // inp_period (2 = monthly)
-        act.periodBudget,                               // inp_period_budget
+        new anchor.BN(uuidparse(uuidv4())),             // inp_payment_id
         act.useTotal,                                   // inp_use_total
         act.totalBudget,                                // inp_total_budget
-        act.nextRebill,                                 // inp_next_rebill
+        act.period,                                     // inp_period (2 = monthly)
+        act.periodBudget,                               // inp_period_budget
         act.rebillMax,                                  // inp_rebill_max
-        act.notValidBefore,                             // inp_not_valid_before
-        act.notValidAfter,                              // inp_not_valid_after
-        act.maxDelay,                                   // inp_max_delay
         true, // act.swap,                              // inp_swap
         true, // act.swap_direction,                    // inp_swap_direction
         0,                                              // inp_swap_mode: 0 = AtxSwapContractV1
@@ -133,6 +137,10 @@ async function main() {
         tokData1.nonce,                                 // inp_swap_inb_nonce
         tokData2.nonce,                                 // inp_swap_out_nonce
         agentToken.nonce,                               // inp_swap_dst_nonce
+        act.maxDelay,                                   // inp_max_delay
+        act.nextRebill,                                 // inp_next_rebill
+        act.notValidBefore,                             // inp_not_valid_before
+        act.notValidAfter,                              // inp_not_valid_after
         {
             accounts: {
                 subscrData: subscrData,
@@ -146,6 +154,10 @@ async function main() {
                 tokenMint: act.tokenMint,
                 tokenAccount: tokenAccount,
                 feesAccount: new PublicKey(feesTK.pubkey),
+                delegateProgram: delegateProgram,
+                delegateRoot: delegateRootPK,
+                allowance: allowancePK,
+                systemProgram: SystemProgram.programId,
             },
             remainingAccounts: [
                 { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
@@ -166,7 +178,7 @@ async function main() {
     var dt1
     var dts1
     var rbtx
-    for (var x = 0; x < 40; x++) {
+    for (var x = 0; x < 3; x++) {
         dt1 = dt0.plus({ days: 1 })
         dts1 = dt1.toFormat("yyyyLLdd")
         console.log('Current Rebill: ' + dts0 + ' (' + Math.floor(dt0.toSeconds()) + ')')
@@ -182,6 +194,7 @@ async function main() {
             swapData.nonce,                                 // inp_swap_data_nonce
             tokData1.nonce,                                 // inp_swap_inb_nonce
             tokData2.nonce,                                 // inp_swap_out_nonce
+            new anchor.BN(0),                               // inp_swap_estimate
             {
                 accounts: {
                     subscrData: subscrData,
@@ -194,11 +207,15 @@ async function main() {
                     tokenProgram: TOKEN_PROGRAM_ID,
                     tokenAccount: act.tokenAccount,
                     feesAccount: new PublicKey(feesTK.pubkey),
+                    delegateProgram: delegateProgram,
+                    delegateRoot: delegateRootPK,
+                    allowance: allowancePK,
                 },
                 remainingAccounts: [
                     { pubkey: new PublicKey(userToken1.pubkey), isWritable: true, isSigner: false },
                     { pubkey: swapContractPK, isWritable: false, isSigner: false },
                     { pubkey: swapDataPK, isWritable: true, isSigner: false },
+                    { pubkey: inputAccount, isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
                     { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
                     { pubkey: swapFeesTK, isWritable: true, isSigner: false },
@@ -206,7 +223,7 @@ async function main() {
                 ],
             }
         )
-        rbtx = await provider.send(tx3, [managerSK])
+        rbtx = await provider.sendAndConfirm(tx3, [managerSK])
         console.log(rbtx)
         dt0 = dt1
         dts0 = dts1

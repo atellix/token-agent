@@ -430,20 +430,16 @@ mod token_agent {
     }
 
     pub fn update_subscription<'info>(ctx: Context<'_, '_, '_, 'info, UpdateSubscr<'info>>,
-        inp_active: bool,
-        inp_link_token: bool,
-        inp_max_delay: i64,
-        inp_next_rebill: i64,
-        inp_not_valid_before: i64,
-        inp_not_valid_after: i64,
-        inp_amount: u64,
-        inp_payment_id: u128,
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
-        inp_period: u8,
-        inp_period_budget: u64,
+        inp_active: bool,
+        inp_link_token: bool,
+        inp_amount: u64,
+        inp_payment_id: u128,
         inp_use_total: bool,
         inp_total_budget: u64,
+        inp_period: u8,
+        inp_period_budget: u64,
         inp_rebill_max: u32,
         inp_swap: bool,
         inp_swap_direction: bool,
@@ -452,6 +448,10 @@ mod token_agent {
         inp_swap_inb_nonce: u8,
         inp_swap_out_nonce: u8,
         inp_swap_dst_nonce: u8,
+        inp_max_delay: i64,
+        inp_next_rebill: i64,
+        inp_not_valid_before: i64,
+        inp_not_valid_after: i64,
     ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
@@ -641,7 +641,7 @@ mod token_agent {
                 }
                 let swap_mode = SwapMode::try_from_primitive(inp_swap_mode);
                 if swap_mode.is_err() {
-                    msg!("Invalid swap mode");
+                    msg!("Invalid swap mode: {}", inp_swap_mode.to_string());
                     return Err(ErrorCode::InvalidSwapMode.into());
                 }
                 if swap_mode.unwrap() == SwapMode::AtxSwapContractV1 {
@@ -1491,7 +1491,7 @@ pub struct UpdateMetadata<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_link_token: bool, inp_initial_amount: u64, inp_merchant_nonce: u8, inp_root_nonce: u8, inp_subscr_id: u128, inp_payment_id: u128, inp_period: u8, inp_period_budget: u64, inp_use_total: bool, inp_total_budget: u64, inp_next_rebill: i64, inp_rebill_max: u32, inp_not_valid_before: i64, inp_not_valid_after: i64, inp_max_delay: i64, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
+#[instruction(inp_link_token: bool, inp_initial_amount: u64, inp_merchant_nonce: u8, inp_root_nonce: u8)]
 pub struct CreateSubscr<'info> {
     #[account(mut)]
     pub subscr_data: UncheckedAccount<'info>,
@@ -1522,7 +1522,7 @@ pub struct CreateSubscr<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_active: bool, inp_link_token: bool, inp_max_delay: i64, inp_next_rebill: i64, inp_not_valid_before: i64, inp_not_valid_after: i64, inp_amount: u64, inp_payment_id: u128, inp_merchant_nonce: u8, inp_root_nonce: u8, inp_period: u8, inp_period_budget: u64, inp_use_total: bool, inp_total_budget: u64, inp_rebill_max: u32, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
+#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
 pub struct UpdateSubscr<'info> {
     #[account(mut)]
     pub subscr_data: Account<'info, SubscrData>,
@@ -1577,7 +1577,7 @@ pub struct ManagerCancel<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8, inp_rebill_ts: i64, inp_rebill_str: String, inp_next_rebill: i64, inp_amount: u64, inp_payment_id: u128, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_estimate: u64)]
+#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
 pub struct ProcessSubscr<'info> {
     #[account(mut)]
     pub subscr_data: Account<'info, SubscrData>,
@@ -1604,7 +1604,7 @@ pub struct ProcessSubscr<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8, inp_payment_id: u128, inp_amount: u64, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
+#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
 pub struct MerchantPayment<'info> {
     pub net_auth: UncheckedAccount<'info>,
     #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]
@@ -1623,7 +1623,7 @@ pub struct MerchantPayment<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8, inp_payment_id: u128, inp_amount: u64, inp_swap: bool, inp_swap_direction: bool, inp_swap_mode: u8, inp_swap_data_nonce: u8, inp_swap_inb_nonce: u8, inp_swap_out_nonce: u8, inp_swap_dst_nonce: u8)]
+#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
 pub struct MerchantReceive<'info> {
     pub net_auth: UncheckedAccount<'info>,
     #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]
