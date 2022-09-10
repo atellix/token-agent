@@ -8,7 +8,7 @@ use anchor_spl::token::{ self, Token, TokenAccount, Transfer };
 use anchor_spl::associated_token::{ AssociatedToken };
 use solana_program::{ system_program, account_info::AccountInfo, clock::Clock };
 
-use net_authority::{ self, cpi::accounts::RecordRevenue, MerchantApproval, ManagerApproval };
+use net_authority::{ self, cpi::accounts::RecordTransaction, MerchantApproval, ManagerApproval };
 use swap_contract::{ cpi::accounts::Swap };
 use token_delegate::{ self, cpi::accounts::{ DelegateApprove, DelegateTransfer } };
 
@@ -16,7 +16,7 @@ declare_id!("AGNTcdPiqzTvTczVNihCFQAoaT6Q6xqrtRMWkExyHCdm");
 
 pub const VERSION_MAJOR: u32 = 1;
 pub const VERSION_MINOR: u32 = 0;
-pub const VERSION_PATCH: u32 = 1;
+pub const VERSION_PATCH: u32 = 2;
 
 #[repr(u8)]
 #[derive(PartialEq, Debug, Eq, Copy, Clone, TryFromPrimitive)]
@@ -59,6 +59,81 @@ fn verify_matching_accounts(left: &Pubkey, right: &Pubkey, error_msg: Option<Str
         return Err(ErrorCode::InvalidAccount.into());
     }
     Ok(())
+}
+
+fn verify_manager_approval(netauth: &Pubkey, manager_approval: &AccountInfo) -> anchor_lang::Result<()> {
+    verify_matching_accounts(netauth, &manager_approval.owner,
+        Some(String::from("Invalid manager approval owner"))
+    )?;
+    let mgr_approval = load_struct::<ManagerApproval>(manager_approval)?;
+    if !mgr_approval.active {
+        msg!("Inactive manager approval");
+        return Err(ErrorCode::NotApproved.into());
+    }
+    Ok(())
+}
+
+fn get_manager_key(manager_approval: &AccountInfo) -> anchor_lang::Result<Pubkey> {
+    let mgr_approval = load_struct::<ManagerApproval>(manager_approval)?;
+    Ok(mgr_approval.manager_key)
+}
+
+fn verify_merchant_approval(
+    dest_nonce: u8,
+    netauth: &Pubkey,
+    merchant_approval: &AccountInfo,
+    merchant_token: &AccountInfo,
+    fees_account: &AccountInfo,
+) -> anchor_lang::Result<u32> {
+    verify_matching_accounts(netauth, &merchant_approval.owner,
+        Some(String::from("Invalid merchant approval owner"))
+    )?;
+    let mrch_approval = load_struct::<MerchantApproval>(merchant_approval)?;
+    if !mrch_approval.active {
+        msg!("Inactive merchant approval");
+        return Err(ErrorCode::NotApproved.into());
+    }
+    verify_matching_accounts(&mrch_approval.fees_account, fees_account.key,
+        Some(String::from("Fees account does not match approval"))
+    )?;
+    // Verify merchant's associated token
+    let derived_merchant_key = Pubkey::create_program_address(
+        &[
+            &mrch_approval.dest_account.to_bytes(),
+            &Token::id().to_bytes(),
+            &mrch_approval.token_mint.to_bytes(),
+            &[dest_nonce]
+        ],
+        &AssociatedToken::id()
+    ).map_err(|_| ErrorCode::InvalidNonce)?;
+    if derived_merchant_key != *merchant_token.key {
+        msg!("Invalid merchant token account");
+        return Err(ErrorCode::InvalidDerivedAccount.into());
+    }
+    Ok(mrch_approval.fees_bps)
+}
+
+fn get_token_mint(merchant_approval: &AccountInfo) -> anchor_lang::Result<Pubkey> {
+    let mrch_approval = load_struct::<MerchantApproval>(merchant_approval)?;
+    Ok(mrch_approval.token_mint)
+}
+
+fn get_merchant_key(merchant_approval: &AccountInfo) -> anchor_lang::Result<Pubkey> {
+    let mrch_approval = load_struct::<MerchantApproval>(merchant_approval)?;
+    Ok(mrch_approval.merchant_key)
+}
+
+fn get_tx_count(merchant_approval: &AccountInfo) -> anchor_lang::Result<u64> {
+    let mrch_approval = load_struct::<MerchantApproval>(merchant_approval)?;
+    Ok(mrch_approval.tx_count)
+}
+
+fn calculate_fees(net_amount: u64, fees_bps: u32) -> anchor_lang::Result<u64> {
+    let f1: u128 = (net_amount as u128) << 64;
+    let f2: u128 = f1.checked_mul(fees_bps as u128).ok_or(error!(ErrorCode::Overflow))?;
+    let f3: u128 = f2.checked_div(10000).ok_or(error!(ErrorCode::Overflow))?;
+    let fees: u64 = (f3 >> 64) as u64;
+    Ok(fees)
 }
 
 #[inline]
@@ -114,7 +189,7 @@ mod token_agent {
     pub fn subscribe<'info>(ctx: Context<'_, '_, '_, 'info, CreateSubscr<'info>>,
         inp_link_token: bool,
         inp_initial_amount: u64,
-        inp_merchant_nonce: u8,
+        inp_dest_nonce: u8,
         inp_root_nonce: u8,
         inp_subscr_id: u128,
         inp_payment_id: u128,
@@ -155,9 +230,9 @@ mod token_agent {
             msg!("Inactive merchant approval");
             return Err(ErrorCode::NotApproved.into());
         }
-        verify_matching_accounts(&mrch_approval.token_mint, &ctx.accounts.token_account.mint,
+        /*verify_matching_accounts(&mrch_approval.token_mint, &ctx.accounts.token_account.mint,
             Some(String::from("Token mint does not match approval"))
-        )?;
+        )?;*/
         verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
             Some(String::from("Fees account does not match approval"))
         )?;
@@ -233,10 +308,10 @@ mod token_agent {
         // Verify merchant's associated token
         let derived_merchant_key = Pubkey::create_program_address(
             &[
-                &mrch_approval.merchant_key.to_bytes(),
+                &mrch_approval.dest_account.to_bytes(),
                 &Token::id().to_bytes(),
-                &ctx.accounts.token_account.mint.to_bytes(),
-                &[inp_merchant_nonce]
+                &mrch_approval.token_mint.to_bytes(),
+                &[inp_dest_nonce]
             ],
             &AssociatedToken::id()
         ).map_err(|_| ErrorCode::InvalidNonce)?;
@@ -293,7 +368,7 @@ mod token_agent {
                     &[
                         &ctx.accounts.root_key.to_account_info().key.to_bytes(),
                         &Token::id().to_bytes(),
-                        &ctx.accounts.token_account.mint.to_bytes(),
+                        &mrch_approval.token_mint.to_bytes(),
                         &[inp_swap_dst_nonce]
                     ],
                     &AssociatedToken::id()
@@ -373,13 +448,13 @@ mod token_agent {
             // Record merchant revenue
             let na_program = ctx.accounts.net_auth.to_account_info();
             if *na_program.key == net_authority::ID {
-                let na_accounts = RecordRevenue {
-                    revenue_admin: ctx.accounts.root_key.to_account_info(),
+                let na_accounts = RecordTransaction {
+                    tx_admin: ctx.accounts.root_key.to_account_info(),
                     merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
                 };
                 let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
-                //msg!("Atellix: Attempt to record revenue");
-                net_authority::cpi::record_revenue(na_ctx, true, net_amount)?;
+                //msg!("Atellix: Attempt to record transaction");
+                net_authority::cpi::record_tx(na_ctx)?;
                 mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?;
             }
         }
@@ -392,7 +467,7 @@ mod token_agent {
         subscr.merchant_approval = *ctx.accounts.merchant_approval.to_account_info().key;
         subscr.manager_key = mgr_approval.manager_key;
         subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
-        subscr.token_mint = ctx.accounts.token_account.mint;
+        subscr.token_mint = mrch_approval.token_mint;
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
         subscr.swap_account = swap_account;
         subscr.subscr_id = inp_subscr_id;
@@ -430,7 +505,7 @@ mod token_agent {
     }
 
     pub fn update_subscription<'info>(ctx: Context<'_, '_, '_, 'info, UpdateSubscr<'info>>,
-        inp_merchant_nonce: u8,
+        inp_dest_nonce: u8,
         inp_root_nonce: u8,
         inp_active: bool,
         inp_link_token: bool,
@@ -476,7 +551,7 @@ mod token_agent {
 
         let clock = Clock::get()?;
         let ts = clock.unix_timestamp;
-        let subscr = &mut ctx.accounts.subscr_data;
+        let mut subscr = load_struct::<SubscrData>(&ctx.accounts.subscr_data.to_account_info())?;
         // Verify user key is the same
         verify_matching_accounts(&subscr.user_key, &ctx.accounts.user_key.to_account_info().key,
             Some(String::from("User key does not match"))
@@ -490,7 +565,7 @@ mod token_agent {
                 event_hash: 163361025719893016519135760137561968517, // solana/program/token-agent/update_subscription/cancel
                 slot: clock.slot,
                 merchant_tx_id: 0,
-                subscr_data: subscr.key(),
+                subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
                 subscr_id: subscr.subscr_id,
                 payment_id: 0,
                 rebill_event: 0,
@@ -504,36 +579,19 @@ mod token_agent {
         }
 
         // Verify network authority is the same
-        let netauth = &ctx.accounts.net_auth.to_account_info().key;
-        verify_matching_accounts(netauth, &subscr.approval_program,
+        verify_matching_accounts(&ctx.accounts.net_auth.to_account_info().key, &subscr.approval_program,
             Some(String::from("Approval program does not match"))
         )?;
 
         // Verify network authority accounts
-        let acc_mrch_approve = &ctx.accounts.merchant_approval.to_account_info();
-        let acc_mgr_approve = &ctx.accounts.manager_approval.to_account_info();
-        verify_matching_accounts(netauth, &acc_mrch_approve.owner,
-            Some(String::from("Invalid merchant approval owner"))
+        let fees_bps: u32 = verify_merchant_approval(
+            inp_dest_nonce,
+            &ctx.accounts.net_auth.to_account_info().key,
+            &ctx.accounts.merchant_approval.to_account_info(),
+            &ctx.accounts.merchant_token.to_account_info(),
+            &ctx.accounts.fees_account.to_account_info(),
         )?;
-        verify_matching_accounts(netauth, &acc_mgr_approve.owner,
-            Some(String::from("Invalid manager approval owner"))
-        )?;
-        let mut mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?;
-        if !mrch_approval.active {
-            msg!("Inactive merchant approval");
-            return Err(ErrorCode::NotApproved.into());
-        }
-        verify_matching_accounts(&mrch_approval.token_mint, &ctx.accounts.token_account.mint,
-            Some(String::from("Token mint does not match approval"))
-        )?;
-        verify_matching_accounts(&mrch_approval.fees_account, &ctx.accounts.fees_account.to_account_info().key,
-            Some(String::from("Fees account does not match approval"))
-        )?;
-        let mgr_approval = load_struct::<ManagerApproval>(&ctx.accounts.manager_approval.to_account_info())?;
-        if !mgr_approval.active {
-            msg!("Inactive manager approval");
-            return Err(ErrorCode::NotApproved.into());
-        }
+        verify_manager_approval(&ctx.accounts.net_auth.to_account_info().key, &ctx.accounts.manager_approval.to_account_info())?;
 
         // Verify input
         let period = SubscriptionPeriod::try_from_primitive(inp_period);
@@ -584,22 +642,7 @@ mod token_agent {
             return Err(ErrorCode::InvalidTimeframe.into());
         }
 
-        // Verify merchant's associated token
-        let derived_merchant_key = Pubkey::create_program_address(
-            &[
-                &mrch_approval.merchant_key.to_bytes(),
-                &Token::id().to_bytes(),
-                &ctx.accounts.token_account.mint.to_bytes(),
-                &[inp_merchant_nonce]
-            ],
-            &AssociatedToken::id()
-        ).map_err(|_| ErrorCode::InvalidNonce)?;
-        if derived_merchant_key != *ctx.accounts.merchant_token.to_account_info().key {
-            msg!("Invalid merchant token account");
-            return Err(ErrorCode::InvalidDerivedAccount.into());
-        }
-
-        // Setup up token delegate if needed
+       // Setup up token delegate if needed
         if !inp_swap && inp_link_token {
             let cpi_accounts = DelegateApprove {
                 allowance: ctx.accounts.allowance.to_account_info(),
@@ -617,10 +660,8 @@ mod token_agent {
         }
 
         // Link swap token if requested
-        let mut swap_account: Pubkey = Pubkey::default();
         if inp_swap {
             let acc_swap_token = ctx.remaining_accounts.get(0).unwrap();        // User Swap Token
-            swap_account = acc_swap_token.key();
 
             // Setup up token delegate if needed
             if inp_link_token {
@@ -651,7 +692,7 @@ mod token_agent {
                     &[
                         &ctx.accounts.root_key.to_account_info().key.to_bytes(),
                         &Token::id().to_bytes(),
-                        &ctx.accounts.token_account.mint.to_bytes(),
+                        &get_token_mint(&ctx.accounts.merchant_approval.to_account_info())?.to_bytes(),
                         &[inp_swap_dst_nonce]
                     ],
                     &AssociatedToken::id()
@@ -690,11 +731,8 @@ mod token_agent {
             let root_pda_signer = &[&root_pda_seeds[..]];
 
             // Calculate fees
-            if mrch_approval.fees_bps > 0 {
-                let f1: u128 = (net_amount as u128) << 64;
-                let f2: u128 = f1.checked_mul(mrch_approval.fees_bps as u128).ok_or(error!(ErrorCode::Overflow))?;
-                let f3: u128 = f2.checked_div(10000).ok_or(error!(ErrorCode::Overflow))?;
-                let fees: u64 = (f3 >> 64) as u64;
+            if fees_bps > 0 {
+                let fees: u64 = calculate_fees(net_amount, fees_bps)?;
                 if fees > 0 {
                     net_amount = net_amount.checked_sub(fees).ok_or(error!(ErrorCode::Overflow))?;
                     fee_amount = fees;
@@ -729,26 +767,25 @@ mod token_agent {
             // Record merchant revenue
             let na_program = ctx.accounts.net_auth.to_account_info();
             if *na_program.key == net_authority::ID {
-                let na_accounts = RecordRevenue {
-                    revenue_admin: ctx.accounts.root_key.to_account_info(),
+                let na_accounts = RecordTransaction {
+                    tx_admin: ctx.accounts.root_key.to_account_info(),
                     merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
                 };
                 let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
-                //msg!("Atellix: Attempt to record revenue");
-                net_authority::cpi::record_revenue(na_ctx, true, net_amount)?;
-                mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?;
+                //msg!("Atellix: Attempt to record transaction");
+                net_authority::cpi::record_tx(na_ctx)?;
             }
         }
 
         // Update subscription data
         subscr.active = true;
-        subscr.merchant_key = mrch_approval.merchant_key;
+        subscr.merchant_key = get_merchant_key(&ctx.accounts.merchant_approval.to_account_info())?;
         subscr.merchant_approval = *ctx.accounts.merchant_approval.to_account_info().key;
-        subscr.manager_key = mgr_approval.manager_key;
+        subscr.manager_key = get_manager_key(&ctx.accounts.manager_approval.to_account_info())?;
         subscr.manager_approval = *ctx.accounts.manager_approval.to_account_info().key;
-        subscr.token_mint = ctx.accounts.token_account.mint;
+        subscr.token_mint = get_token_mint(&ctx.accounts.merchant_approval.to_account_info())?;
         subscr.token_account = *ctx.accounts.token_account.to_account_info().key;
-        subscr.swap_account = swap_account;
+        subscr.swap_account = if inp_swap { *ctx.remaining_accounts.get(0).unwrap().key } else { Pubkey::default() };
         //subscr.rebill_max = inp_rebill_max;
         subscr.next_rebill = inp_next_rebill;
         subscr.max_delay = inp_max_delay;
@@ -761,13 +798,14 @@ mod token_agent {
         subscr.swap = inp_swap;
         subscr.swap_direction = inp_swap_direction;
         subscr.swap_mode = inp_swap_mode;
+        store_struct(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
         msg!("atellix-log");
         emit!(SubscrEvent {
             event_hash: 298296161986799263364555576740275705662, // solana/program/token-agent/update_subscription
             slot: clock.slot,
-            merchant_tx_id: mrch_approval.tx_count,
-            subscr_data: subscr.key(),
+            merchant_tx_id: get_tx_count(&ctx.accounts.merchant_approval.to_account_info())?,
+            subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
             subscr_id: subscr.subscr_id,
             payment_id: inp_payment_id,
             rebill_event: 0,
@@ -864,7 +902,7 @@ mod token_agent {
         let ts = clock.unix_timestamp;
 
         // Validate accounts
-        let subscr = &mut ctx.accounts.subscr_data;
+        let mut subscr = load_struct::<SubscrData>(&ctx.accounts.subscr_data.to_account_info())?;
         verify_matching_accounts(&subscr.manager_approval, ctx.accounts.manager_approval.to_account_info().key,
             Some(String::from("Manager approval does not match subscription"))
         )?;
@@ -1121,13 +1159,13 @@ mod token_agent {
             // Record merchant revenue
             let na_program = ctx.accounts.net_auth.to_account_info();
             if *na_program.key == net_authority::ID {
-                let na_accounts = RecordRevenue {
-                    revenue_admin: ctx.accounts.root_key.to_account_info(),
+                let na_accounts = RecordTransaction {
+                    tx_admin: ctx.accounts.root_key.to_account_info(),
                     merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
                 };
                 let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
-                //msg!("Atellix: Attempt to record revenue");
-                net_authority::cpi::record_revenue(na_ctx, true, net_amount)?;
+                //msg!("Atellix: Attempt to record transaction");
+                net_authority::cpi::record_tx(na_ctx)?;
                 mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?
             }
         }
@@ -1135,13 +1173,14 @@ mod token_agent {
         // Update parameters
         subscr.next_rebill = inp_next_rebill;
         subscr.rebill_events = subscr.rebill_events.checked_add(1).ok_or(error!(ErrorCode::Overflow))?;
+        store_struct(&subscr, &ctx.accounts.subscr_data.to_account_info())?;
 
         msg!("atellix-log");
         emit!(SubscrEvent {
             event_hash: 196800858676461937700417377973077375575, // solana/program/token-agent/process
             slot: clock.slot,
             merchant_tx_id: mrch_approval.tx_count,
-            subscr_data: subscr.key(),
+            subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
             subscr_id: subscr.subscr_id,
             payment_id: inp_payment_id,
             rebill_event: subscr.rebill_events,
@@ -1156,7 +1195,7 @@ mod token_agent {
     }
 
     pub fn merchant_payment<'info>(ctx: Context<'_, '_, '_, 'info, MerchantPayment<'info>>,
-        inp_merchant_nonce: u8,
+        inp_dest_nonce: u8,
         inp_root_nonce: u8,
         inp_payment_id: u128,
         inp_amount: u64,
@@ -1170,14 +1209,14 @@ mod token_agent {
     ) -> anchor_lang::Result<()> {
         let clock = Clock::get()?;
 
-        // Verify merchant's associated token
+        // Verify merchant's associated token for the destination account
         let mut mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?;
         let derived_merchant_key = Pubkey::create_program_address(
             &[
-                &mrch_approval.merchant_key.to_bytes(),
+                &mrch_approval.dest_account.to_bytes(),
                 &Token::id().to_bytes(),
                 &ctx.accounts.token_account.mint.to_bytes(),
-                &[inp_merchant_nonce]
+                &[inp_dest_nonce]
             ],
             &AssociatedToken::id()
         ).map_err(|_| ErrorCode::InvalidNonce)?;
@@ -1295,16 +1334,16 @@ mod token_agent {
             }
             token::transfer(cpi_ctx, net_amount)?;
 
-            // Record merchant revenue
+            // Record merchant transaction
             let na_program = ctx.accounts.net_auth.to_account_info();
             if *na_program.key == net_authority::ID {
-                let na_accounts = RecordRevenue {
-                    revenue_admin: ctx.accounts.root_key.to_account_info(),
+                let na_accounts = RecordTransaction {
+                    tx_admin: ctx.accounts.root_key.to_account_info(),
                     merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
                 };
                 let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
-                //msg!("Atellix: Attempt to record revenue");
-                net_authority::cpi::record_revenue(na_ctx, true, net_amount)?;
+                //msg!("Atellix: Attempt to record transaction");
+                net_authority::cpi::record_tx(na_ctx)?;
                 mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?;
             }
         }
@@ -1315,6 +1354,8 @@ mod token_agent {
             slot: clock.slot,
             merchant_tx_id: mrch_approval.tx_count,
             merchant_key: mrch_approval.merchant_key,
+            merchant_token: *ctx.accounts.merchant_token.to_account_info().key,
+            dest_account: mrch_approval.dest_account,
             user_key: *ctx.accounts.user_key.to_account_info().key,
             total: inp_amount,
             amount: net_amount,
@@ -1326,7 +1367,7 @@ mod token_agent {
         Ok(())
     }
 
-    pub fn merchant_receive<'info>(ctx: Context<'_, '_, '_, 'info, MerchantReceive<'info>>,
+    /*pub fn merchant_receive<'info>(ctx: Context<'_, '_, '_, 'info, MerchantReceive<'info>>,
         inp_merchant_nonce: u8,
         inp_root_nonce: u8,
         inp_payment_id: u128,
@@ -1466,16 +1507,16 @@ mod token_agent {
             }
             token::transfer(cpi_ctx, net_amount)?;
 
-            // Record merchant revenue
+            // Record merchant transaction
             let na_program = ctx.accounts.net_auth.to_account_info();
             if *na_program.key == net_authority::ID {
-                let na_accounts = RecordRevenue {
-                    revenue_admin: ctx.accounts.root_key.to_account_info(),
+                let na_accounts = RecordTransaction {
+                    tx_admin: ctx.accounts.root_key.to_account_info(),
                     merchant_approval: ctx.accounts.merchant_approval.to_account_info(),
                 };
                 let na_ctx = CpiContext::new_with_signer(na_program, na_accounts, root_pda_signer);
-                //msg!("Atellix: Attempt to record revenue");
-                net_authority::cpi::record_revenue(na_ctx, true, net_amount)?;
+                //msg!("Atellix: Attempt to record transaction");
+                net_authority::cpi::record_tx(na_ctx)?;
                 mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?;
             }
         }
@@ -1495,7 +1536,7 @@ mod token_agent {
         });
 
         Ok(())
-    }
+    }*/
 }
 
 #[derive(Accounts)]
@@ -1512,7 +1553,7 @@ pub struct UpdateMetadata<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_link_token: bool, inp_initial_amount: u64, inp_merchant_nonce: u8, inp_root_nonce: u8)]
+#[instruction(inp_link_token: bool, inp_initial_amount: u64, inp_dest_nonce: u8, inp_root_nonce: u8)]
 pub struct CreateSubscr<'info> {
     #[account(mut)]
     pub subscr_data: UncheckedAccount<'info>,
@@ -1523,14 +1564,13 @@ pub struct CreateSubscr<'info> {
     pub merchant_approval: UncheckedAccount<'info>,
     #[account(mut)]
     pub merchant_token: UncheckedAccount<'info>,
-    //pub manager_key: UncheckedAccount<'info>,
     pub manager_approval: UncheckedAccount<'info>,
     #[account(mut)]
     pub user_key: Signer<'info>,
     #[account(address = token::ID)]
     pub token_program: UncheckedAccount<'info>,
     #[account(mut)]
-    pub token_account: Account<'info, TokenAccount>,
+    pub token_account: UncheckedAccount<'info>,
     #[account(mut)]
     pub fees_account: UncheckedAccount<'info>,
     #[account(address = token_delegate::ID)]
@@ -1543,10 +1583,10 @@ pub struct CreateSubscr<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
+#[instruction(inp_dest_nonce: u8, inp_root_nonce: u8)]
 pub struct UpdateSubscr<'info> {
     #[account(mut)]
-    pub subscr_data: Account<'info, SubscrData>,
+    pub subscr_data: UncheckedAccount<'info>,
     pub net_auth: UncheckedAccount<'info>,
     #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]
     pub root_key: UncheckedAccount<'info>,
@@ -1559,7 +1599,7 @@ pub struct UpdateSubscr<'info> {
     #[account(address = token::ID)]
     pub token_program: UncheckedAccount<'info>,
     #[account(mut)]
-    pub token_account: Account<'info, TokenAccount>,
+    pub token_account: UncheckedAccount<'info>,
     #[account(mut)]
     pub fees_account: UncheckedAccount<'info>,
     #[account(address = token_delegate::ID)]
@@ -1601,7 +1641,7 @@ pub struct ManagerCancel<'info> {
 #[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
 pub struct ProcessSubscr<'info> {
     #[account(mut)]
-    pub subscr_data: Account<'info, SubscrData>,
+    pub subscr_data: UncheckedAccount<'info>,
     pub net_auth: UncheckedAccount<'info>,
     #[account(seeds = [program_id.as_ref()], bump = inp_root_nonce)]
     pub root_key: UncheckedAccount<'info>,
@@ -1643,7 +1683,7 @@ pub struct MerchantPayment<'info> {
     pub fees_account: UncheckedAccount<'info>,
 }
 
-#[derive(Accounts)]
+/*#[derive(Accounts)]
 #[instruction(inp_merchant_nonce: u8, inp_root_nonce: u8)]
 pub struct MerchantReceive<'info> {
     pub net_auth: UncheckedAccount<'info>,
@@ -1660,7 +1700,7 @@ pub struct MerchantReceive<'info> {
     pub token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub fees_account: UncheckedAccount<'info>,
-}
+}*/
 
 #[account]
 pub struct SubscrData {
@@ -1744,6 +1784,8 @@ pub struct PaymentEvent {
     pub slot: u64,
     pub merchant_tx_id: u64,
     pub merchant_key: Pubkey,
+    pub merchant_token: Pubkey,
+    pub dest_account: Pubkey,
     pub user_key: Pubkey,
     pub payment_id: u128,
     pub total: u64,
