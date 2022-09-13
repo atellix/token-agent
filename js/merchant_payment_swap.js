@@ -7,7 +7,7 @@ const fs = require('fs').promises
 const base32 = require("base32.js")
 
 const anchor = require('@project-serum/anchor')
-const provider = anchor.Provider.env()
+const provider = anchor.AnchorProvider.env()
 //const provider = anchor.Provider.local()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
@@ -63,8 +63,8 @@ async function main() {
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
 
-    const merchantPK = new PublicKey(netData.merchant1)
     const merchantAP = new PublicKey(netData.merchantApproval1)
+    const merchantPK = new PublicKey(netData.merchant1_dest)
     const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
     const feesPK = new PublicKey(netData.fees1)
     const feesTK = await associatedTokenAddress(feesPK, tokenMint)
@@ -129,6 +129,30 @@ async function main() {
 
     const transactId = uuidv4()
     console.log('Merchant Payment: ' + transactId)
+    console.log([
+        {
+            netAuth: netAuth.toString(),
+            rootKey: new PublicKey(rootKey.pubkey).toString(),
+            merchantKey: merchantPK.toString(),
+            merchantApproval: merchantAP.toString(),
+            merchantToken: new PublicKey(merchantTK.pubkey).toString(),
+            userKey: provider.wallet.publicKey.toString(),
+            tokenProgram: TOKEN_PROGRAM_ID.toString(),
+            tokenMint: tokenMint.toString(),
+            tokenAccount: tokenAccount.toString(),
+            feesAccount: new PublicKey(feesTK.pubkey).toString(),
+        },
+        [
+            { pubkey: new PublicKey(userToken1.pubkey).toString() },
+            { pubkey: swapContractPK.toString() },
+            { pubkey: new PublicKey(swapData.pubkey).toString() },
+            { pubkey: new PublicKey(tokData1.pubkey).toString() },
+            { pubkey: new PublicKey(tokData2.pubkey).toString() },
+            { pubkey: swapFeesTK.toString() },
+            { pubkey: new PublicKey('GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR').toString() },
+        ],
+    ])
+
     let apires = await tokenAgent.rpc.merchantPayment(
         merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
         rootKey.nonce,                                  // inp_root_nonce
@@ -144,7 +168,6 @@ async function main() {
         {
             accounts: {
                 netAuth: netAuth,
-                netRoot: new PublicKey(netRoot.pubkey),
                 rootKey: new PublicKey(rootKey.pubkey),
                 merchantKey: merchantPK,
                 merchantApproval: merchantAP,
@@ -162,7 +185,7 @@ async function main() {
                 { pubkey: new PublicKey(tokData1.pubkey), isWritable: true, isSigner: false },
                 { pubkey: new PublicKey(tokData2.pubkey), isWritable: true, isSigner: false },
                 { pubkey: swapFeesTK, isWritable: true, isSigner: false },
-                { pubkey: new PublicKey('DpoK8Zz69APV9ntjuY9C4LZCxANYMV56M2cbXEdkjxME'), isWritable: false, isSigner: false },
+                { pubkey: new PublicKey('GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR'), isWritable: false, isSigner: false },
             ],
         }
     )

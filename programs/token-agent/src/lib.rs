@@ -123,6 +123,11 @@ fn get_merchant_key(merchant_approval: &AccountInfo) -> anchor_lang::Result<Pubk
     Ok(mrch_approval.merchant_key)
 }
 
+fn get_dest_account(merchant_approval: &AccountInfo) -> anchor_lang::Result<Pubkey> {
+    let mrch_approval = load_struct::<MerchantApproval>(merchant_approval)?;
+    Ok(mrch_approval.dest_account)
+}
+
 fn get_tx_count(merchant_approval: &AccountInfo) -> anchor_lang::Result<u64> {
     let mrch_approval = load_struct::<MerchantApproval>(merchant_approval)?;
     Ok(mrch_approval.tx_count)
@@ -490,6 +495,10 @@ mod token_agent {
             event_hash: 176440469768111763486207729736362869784, // solana/program/token-agent/subscribe
             slot: clock.slot,
             merchant_tx_id: mrch_approval.tx_count,
+            merchant_key: subscr.merchant_key,
+            merchant_token: *ctx.accounts.merchant_token.to_account_info().key,
+            dest_account: get_dest_account(&ctx.accounts.merchant_approval.to_account_info())?,
+            user_key: subscr.user_key,
             subscr_data: ctx.accounts.subscr_data.key(),
             subscr_id: inp_subscr_id,
             payment_id: inp_payment_id,
@@ -565,6 +574,10 @@ mod token_agent {
                 event_hash: 163361025719893016519135760137561968517, // solana/program/token-agent/update_subscription/cancel
                 slot: clock.slot,
                 merchant_tx_id: 0,
+                merchant_key: subscr.merchant_key,
+                merchant_token: Pubkey::default(),
+                dest_account: Pubkey::default(),
+                user_key: subscr.user_key,
                 subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
                 subscr_id: subscr.subscr_id,
                 payment_id: 0,
@@ -805,6 +818,10 @@ mod token_agent {
             event_hash: 298296161986799263364555576740275705662, // solana/program/token-agent/update_subscription
             slot: clock.slot,
             merchant_tx_id: get_tx_count(&ctx.accounts.merchant_approval.to_account_info())?,
+            merchant_key: subscr.merchant_key,
+            merchant_token: *ctx.accounts.merchant_token.to_account_info().key,
+            dest_account: get_dest_account(&ctx.accounts.merchant_approval.to_account_info())?,
+            user_key: subscr.user_key,
             subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
             subscr_id: subscr.subscr_id,
             payment_id: inp_payment_id,
@@ -871,6 +888,10 @@ mod token_agent {
             event_hash: 14511983483732720963723889670203659368, // solana/program/token-agent/manager_cancel
             slot: clock.slot,
             merchant_tx_id: 0,
+            merchant_key: subscr.merchant_key,
+            merchant_token: Pubkey::default(),
+            dest_account: Pubkey::default(),
+            user_key: subscr.user_key,
             subscr_data: subscr.key(),
             subscr_id: subscr.subscr_id,
             payment_id: 0,
@@ -886,7 +907,7 @@ mod token_agent {
     }
 
     pub fn process<'info>(ctx: Context<'_, '_, '_, 'info, ProcessSubscr<'info>>,
-        inp_merchant_nonce: u8,
+        inp_dest_nonce: u8,
         inp_root_nonce: u8,
         inp_rebill_ts: i64,
         inp_rebill_str: String,
@@ -931,10 +952,10 @@ mod token_agent {
         let mut mrch_approval = load_struct::<MerchantApproval>(&ctx.accounts.merchant_approval.to_account_info())?;
         let derived_merchant_key = Pubkey::create_program_address(
             &[
-                &mrch_approval.merchant_key.to_bytes(),
+                &mrch_approval.dest_account.to_bytes(),
                 &Token::id().to_bytes(),
                 &ctx.accounts.token_account.mint.to_bytes(),
-                &[inp_merchant_nonce]
+                &[inp_dest_nonce]
             ],
             &AssociatedToken::id()
         ).map_err(|_| ErrorCode::InvalidNonce)?;
@@ -1180,6 +1201,10 @@ mod token_agent {
             event_hash: 196800858676461937700417377973077375575, // solana/program/token-agent/process
             slot: clock.slot,
             merchant_tx_id: mrch_approval.tx_count,
+            merchant_key: subscr.merchant_key,
+            merchant_token: *ctx.accounts.merchant_token.to_account_info().key,
+            dest_account: mrch_approval.dest_account,
+            user_key: subscr.user_key,
             subscr_data: *ctx.accounts.subscr_data.to_account_info().key,
             subscr_id: subscr.subscr_id,
             payment_id: inp_payment_id,
@@ -1767,6 +1792,10 @@ pub struct SubscrEvent {
     pub event_hash: u128,
     pub slot: u64,
     pub merchant_tx_id: u64,
+    pub merchant_key: Pubkey,
+    pub merchant_token: Pubkey,
+    pub dest_account: Pubkey,
+    pub user_key: Pubkey,
     pub subscr_data: Pubkey,
     pub subscr_id: u128,
     pub payment_id: u128,

@@ -7,7 +7,7 @@ const fs = require('fs').promises
 const base32 = require("base32.js")
 
 const anchor = require('@project-serum/anchor')
-const provider = anchor.Provider.env()
+const provider = anchor.AnchorProvider.env()
 //const provider = anchor.Provider.local()
 anchor.setProvider(provider)
 const tokenAgent = anchor.workspace.TokenAgent
@@ -54,8 +54,8 @@ async function main() {
     const netRoot = await programAddress([netAuth.toBuffer()], netAuth)
     const netRBAC = new PublicKey(netData.netAuthorityRBAC)
 
-    const merchantPK = new PublicKey(netData.merchant1)
     const merchantAP = new PublicKey(netData.merchantApproval1)
+    const merchantPK = new PublicKey(netData.merchant1_dest)
     const merchantTK = await associatedTokenAddress(merchantPK, tokenMint)
     const feesPK = new PublicKey(netData.fees1)
     const feesTK = await associatedTokenAddress(feesPK, tokenMint)
@@ -109,23 +109,31 @@ async function main() {
 
     const transactId = uuidv4()
     console.log('Merchant Payment: ' + transactId)
+    console.log({
+        netAuth: netAuth.toString(),
+        rootKey: new PublicKey(rootKey.pubkey).toString(),
+        merchantApproval: merchantAP.toString(),
+        merchantToken: new PublicKey(merchantTK.pubkey).toString(),
+        userKey: provider.wallet.publicKey.toString(),
+        tokenProgram: TOKEN_PROGRAM_ID.toString(),
+        tokenAccount: tokenAccount.toString(),
+        feesAccount: new PublicKey(feesTK.pubkey).toString(),
+    })
     let apires = await tokenAgent.rpc.merchantPayment(
-        merchantTK.nonce,                               // inp_merchant_nonce (merchant associated token account nonce)
+        merchantTK.nonce,                               // inp_dest_nonce (merchant associated token dest account nonce)
         rootKey.nonce,                                  // inp_root_nonce
-        netRoot.nonce,                                  // inp_net_nonce
         new anchor.BN(1234),                            // inp_payment_id
         new anchor.BN(20 * (10**4)),                    // inp_amount
         false,                                          // inp_swap
         false,                                          // inp_swap_direction
-        0,                                              // inp_swap_root_nonce
+        0,                                              // inp_swap_mode
+        0,                                              // inp_swap_data_nonce
         0,                                              // inp_swap_inb_nonce
         0,                                              // inp_swap_out_nonce
         0,                                              // inp_swap_dst_nonce
         {
             accounts: {
                 netAuth: netAuth,
-                netRoot: new PublicKey(netRoot.pubkey),
-                netRbac: netRBAC,
                 rootKey: new PublicKey(rootKey.pubkey),
                 merchantApproval: merchantAP,
                 merchantToken: new PublicKey(merchantTK.pubkey),
